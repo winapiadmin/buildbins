@@ -48,7 +48,6 @@ jobs:
       # -------------------------
       - name: Clone LLVM
         run: |
-          cd /tmp
           git clone -b "$LLVM_BRANCH" --single-branch \
             "$LLVM_REPO_URL" llvm-project
           
@@ -62,7 +61,7 @@ jobs:
       # -------------------------
       - name: Build Python 3.12 (shared)
         run: |
-          cd /tmp
+          cd /workdir
           wget https://www.python.org/ftp/python/3.12.7/Python-3.12.7.tgz
           tar xf Python-3.12.7.tgz
           cd Python-3.12.7
@@ -86,7 +85,7 @@ jobs:
       # -------------------------
       - name: Configure LLVM
         run: |
-          cd /tmp/llvm-project
+          cd /workdir/llvm-project
           mkdir build
           cd build
 
@@ -114,7 +113,7 @@ jobs:
       # -------------------------
       - name: Build LLVM
         run: |
-          cd /tmp/llvm-project/build
+          cd /workdir/llvm-project/build
           ninja
 
       # -------------------------
@@ -122,7 +121,7 @@ jobs:
       # -------------------------
       - name: Get commit info
         run: |
-          cd /tmp/llvm-project
+          cd /workdir/llvm-project
           COMMIT_SHA=$(git rev-parse --short HEAD)
           echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_ENV
 
@@ -131,7 +130,7 @@ jobs:
       # -------------------------
       - name: Stage install
         run: |
-          cd /tmp/llvm-project/build
+          cd /workdir/llvm-project/build
           DESTDIR=destdir ninja install
 
           if [ -d destdir/usr/bin ]; then
@@ -144,7 +143,7 @@ jobs:
       # -------------------------
       - name: Package
         run: |
-          cd /tmp/llvm-project/build
+          cd /workdir/llvm-project/build
           FILENAME="llvm-${LLVM_BRANCH}-${COMMIT_SHA}-linux-x86_64.tar.gz"
           tar -C destdir -czf "$FILENAME" .
           echo "PACKAGE_FILE=$FILENAME" >> $GITHUB_ENV
@@ -152,7 +151,7 @@ jobs:
       - name: Create tag for commit (if needed)
         if: github.event_name == 'workflow_dispatch'
         run: |
-          cd /tmp/llvm-project
+          cd /workdir/llvm-project
 
           TAG="llvm-${LLVM_BRANCH}-${COMMIT_SHA}"
           echo "TAG_NAME=$TAG" >> $GITHUB_ENV
@@ -169,7 +168,7 @@ jobs:
           tag_name: ${{ env.TAG_NAME || github.ref_name }}
           name: LLVM ${{ env.TAG_NAME || github.ref_name }}
           prerelease: true
-          files: /tmp/llvm-project/build/${{ env.PACKAGE_FILE }}
+          files: /workdir/llvm-project/build/${{ env.PACKAGE_FILE }}
           body: |
             LLVM snapshot build
             Branch: ${{ env.LLVM_BRANCH }}
