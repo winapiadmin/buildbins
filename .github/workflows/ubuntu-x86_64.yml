@@ -1,0 +1,162 @@
+name: LLVM build for ubuntu-x86_64
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      llvm_branch:
+        description: "LLVM branch (default: main)"
+        required: false
+        default: "main"
+      llvm_commit:
+        description: "LLVM commit SHA (leave empty for branch HEAD)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    env:
+      LLVM_BRANCH: ${{ github.event.inputs.llvm_branch || github.ref_name }}
+      LLVM_COMMIT: ${{ github.event.inputs.llvm_commit }}
+      LLVM_REPO_URL: https://github.com/llvm/llvm-project.git
+      PY_PREFIX: /tmp/python
+
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential \
+            git \
+            cmake \
+            ninja-build \
+            wget \
+            zlib1g-dev \
+            libzstd-dev \
+            zstd \
+            libxml2-dev \
+            libz3-dev
+
+      # -------------------------
+      # Clone LLVM
+      # -------------------------
+      - name: Clone LLVM
+        run: |
+          cd /tmp
+          git clone -b "$LLVM_BRANCH" --single-branch \
+            "$LLVM_REPO_URL" llvm-project
+          
+          if [ -n "$LLVM_COMMIT" ]; then
+            cd llvm-project
+            git checkout "$LLVM_COMMIT"
+          fi
+
+      # -------------------------
+      # Build Python (shared)
+      # -------------------------
+      - name: Build Python 3.12 (shared)
+        run: |
+          cd /tmp
+          wget https://www.python.org/ftp/python/3.12.7/Python-3.12.7.tgz
+          tar xf Python-3.12.7.tgz
+          cd Python-3.12.7
+
+          make distclean || true
+
+          ./configure \
+            --prefix=$PY_PREFIX \
+            --enable-shared \
+            --with-ensurepip=install \
+            CFLAGS="-O2 -fPIC" \
+            LDFLAGS="-Wl,-rpath,$PY_PREFIX/lib"
+
+          make -j$(nproc)
+          make install
+
+          ls $PY_PREFIX/lib | grep libpython3.12.so
+
+      # -------------------------
+      # Configure LLVM
+      # -------------------------
+      - name: Configure LLVM
+        run: |
+          cd /tmp/llvm-project
+          mkdir build
+          cd build
+
+          cmake -S ../llvm -B . \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_INSTALL_PREFIX="/" \
+            -DLLVM_ENABLE_PROJECTS=all \
+            -DLLVM_ENABLE_RUNTIMES=all \
+            -DLLVM_ENABLE_ZLIB=ON \
+            -DLLVM_ENABLE_ZSTD=ON \
+            -DLLVM_ENABLE_Z3_SOLVER=ON \
+            -DLLVM_INCLUDE_DOCS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_TOOLS=ON \
+            -DLLVM_INCLUDE_UTILS=ON \
+            -DLLVM_OPTIMIZED_TABLEGEN=ON \
+            -DPython3_EXECUTABLE=$PY_PREFIX/bin/python3.12 \
+            -DPython3_LIBRARY=$PY_PREFIX/lib/libpython3.12.so \
+            -DPython3_INCLUDE_DIR=$PY_PREFIX/include/python3.12
+
+      # -------------------------
+      # Build LLVM
+      # -------------------------
+      - name: Build LLVM
+        run: |
+          cd /tmp/llvm-project/build
+          ninja
+
+      # -------------------------
+      # Get commit info
+      # -------------------------
+      - name: Get commit info
+        run: |
+          cd /tmp/llvm-project
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_ENV
+
+      # -------------------------
+      # Install (DESTDIR)
+      # -------------------------
+      - name: Stage install
+        run: |
+          cd /tmp/llvm-project/build
+          DESTDIR=destdir ninja install
+
+          if [ -d destdir/usr/bin ]; then
+            mkdir -p destdir/bin
+            mv destdir/usr/bin/* destdir/bin/
+          fi
+
+      # -------------------------
+      # Package
+      # -------------------------
+      - name: Package
+        run: |
+          cd /tmp/llvm-project/build
+          FILENAME="llvm-${LLVM_BRANCH}-${COMMIT_SHA}-linux-x86_64.tar.gz"
+          tar -C destdir -czf "$FILENAME" .
+          echo "PACKAGE_FILE=$FILENAME" >> $GITHUB_ENV
+
+      # -------------------------
+      # Publish Release
+      # -------------------------
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: /tmp/llvm-project/build/${{ env.PACKAGE_FILE }}
+          name: LLVM ${{ github.ref_name }}
+          body: |
+            LLVM build for ${{ github.ref_name }}
