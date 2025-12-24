@@ -1,5 +1,4 @@
 #!/bin/bash
-sudo apt install -y z3 libz3-dev zlib1g zlib1g-dev libzstd-dev zstd libzstd1
 
 # Display all commands before executing them.
 set -o errexit
@@ -20,15 +19,32 @@ then
 
   exit 1
 fi
-
+cd /tmp
 # Clone the LLVM project.
 if [ ! -d llvm-project ]
 then
 	git clone -b $LLVM_BRANCH --single-branch --depth=1 "$LLVM_REPO_URL" llvm-project
 fi
+if [ ! -f Python-3.12.7.tgz ]
+then
+  wget https://www.python.org/ftp/python/3.12.7/Python-3.12.7.tgz
+fi
+if [ ! -d Python-3.12.7 ]
+then
+  tar xf Python-3.12.7.tgz
+fi
+cd Python-3.12.7
+make distclean || true
 
-
-cd llvm-project
+#./configure \
+#  --prefix=/tmp/python \
+#  --enable-shared \
+#  --with-ensurepip=install \
+#  CFLAGS="-O2 -fPIC" \
+#  LDFLAGS="-Wl,-rpath,/tmp/python"
+#make -j$(nproc)
+#make install
+cd ../llvm-project
 git fetch origin
 git checkout $LLVM_BRANCH
 git reset --hard origin/$LLVM_BRANCH
@@ -57,10 +73,9 @@ case "${LLVM_CROSS}" in
     riscv64*) CROSS_COMPILE="-DLLVM_HOST_TRIPLE=riscv64-linux-gnu" ;;
     *) ;;
 esac
-
+pwd
 # Run `cmake` to configure the project.
-cmake \
-  -G Ninja \
+cmake -S ../llvm -B . \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DCMAKE_INSTALL_PREFIX="/" \
   -DLLVM_ENABLE_PROJECTS=all \
@@ -74,12 +89,14 @@ cmake \
   -DLLVM_INCLUDE_TOOLS=ON \
   -DLLVM_INCLUDE_UTILS=ON \
   -DLLVM_OPTIMIZED_TABLEGEN=ON \
+  -DPython3_EXECUTABLE=/tmp/python/bin/python3.12 \
+  -DPython3_LIBRARY=/tmp/python/lib/libpython3.12.so \
+  -DPython3_INCLUDE_DIR=/tmp/python/include/python3.12 \
   "${CROSS_COMPILE}" \
-  "${CMAKE_ARGUMENTS}" \
-  ../llvm
+  "${CMAKE_ARGUMENTS}"
 
 # Showtime!
-cmake --build . --config RelWithDebInfo
+cmake --build . --config RelWithDebInfo -j$(nproc)
 DESTDIR=destdir cmake --install . --strip --config RelWithDebInfo
 
 # move usr/bin/* to bin/ or llvm-config will be broken
