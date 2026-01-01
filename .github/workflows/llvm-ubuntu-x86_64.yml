@@ -29,18 +29,25 @@ jobs:
       PY_PREFIX: ${{ github.workspace }}/python
 
     steps:
-      # Building LLVM can take a whopping 60GB of space
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@master
+      # Building LLVM can take a whopping 60GB of space so there's... many steps for cleaning      
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
         with:
-          root-reserve-mb: 32768
-          swap-size-mb: 1024
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
-          
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+      
+      - name: Disk space optimizer
+        uses: hugoalh/disk-space-optimizer-ghaction@v0.8.0
+        with:
+          operate_sudo: "True"
+          docker_prune: "True"
+          apt_clean: "True"
+
       - name: Install dependencies
         run: |
           sudo apt update
