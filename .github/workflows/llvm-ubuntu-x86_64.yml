@@ -50,13 +50,17 @@ jobs:
       - name: Clone LLVM
         run: |
           cd $WORK
-          git clone -b "$LLVM_BRANCH" --single-branch \
-            "$LLVM_REPO_URL" llvm-project
-          
+          git clone \
+            --depth=1 \
+            --branch "$LLVM_BRANCH" \
+            https://github.com/llvm/llvm-project.git
+      
           if [ -n "$LLVM_COMMIT" ]; then
             cd llvm-project
+            git fetch --depth=1 origin "$LLVM_COMMIT"
             git checkout "$LLVM_COMMIT"
           fi
+
 
       # -------------------------
       # Build Python (shared)
