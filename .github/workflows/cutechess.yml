@@ -249,7 +249,7 @@ jobs:
 # 3. LINUX APPIMAGE (runs on tag releases)
 # ------------------------------------------------------------
   appimage:
-    needs: build
+    needs: release
     runs-on: ubuntu-latest
   
     steps:
