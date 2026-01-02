@@ -27,7 +27,13 @@ jobs:
 
     strategy:
       matrix:
-        qt_version: ["5.15.2", "6.7.2"]
+        include:
+          - qt_version: "5.15.2"
+            qt_arch: "win64_msvc2019_64"
+            qt_label: "qt5"
+          - qt_version: "6.7.2"
+            qt_arch: "win64_msvc2022_64"
+            qt_label: "qt6"
 
     env:
       REPO_URL: ${{ github.event.inputs.repo_url }}
@@ -53,7 +59,7 @@ jobs:
           version: ${{ matrix.qt_version }}
           host: windows
           target: desktop
-          arch: win64_msvc2022_64
+          arch: ${{ matrix.qt_arch }}
 
       - name: Configure
         shell: cmd
@@ -81,18 +87,18 @@ jobs:
         run: |
           cd build\install
           powershell -Command ^
-            "Compress-Archive -Path * -DestinationPath ..\cutechess-%REPO_BRANCH%-%COMMIT_SHA%-windows-x86_64-qt${{ matrix.qt_version }}.zip"
-          echo PACKAGE_FILE=cutechess-%REPO_BRANCH%-%COMMIT_SHA%-windows-x86_64-qt${{ matrix.qt_version }}.zip>>%GITHUB_ENV%
+            "Compress-Archive -Path * -DestinationPath ..\cutechess-%REPO_BRANCH%-%COMMIT_SHA%-windows-x86_64-${{ matrix.qt_label }}.zip"
+          echo PACKAGE_FILE=cutechess-%REPO_BRANCH%-%COMMIT_SHA%-windows-x86_64-${{ matrix.qt_label }}.zip>>%GITHUB_ENV%
 
       - name: Publish Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: cutechess Windows (Qt ${{ matrix.qt_version }})
+          name: cutechess Windows (${{ matrix.qt_label }})
           files: ${{ github.workspace }}/build/${{ env.PACKAGE_FILE }}
           body: |
             cutechess snapshot build for Windows x86_64
-            Qt version: ${{ matrix.qt_version }}
+            Qt: ${{ matrix.qt_version }}
             Branch: ${{ env.REPO_BRANCH }}
             Commit: ${{ env.COMMIT_SHA }}
