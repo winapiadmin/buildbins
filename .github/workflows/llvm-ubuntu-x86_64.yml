@@ -111,13 +111,13 @@ jobs:
       - name: Configure LLVM
         run: |
           cd $WORK/llvm-project
-          mkdir build
+          mkdir build; mkdir -p $WORK/destdir
           cd build
 
           cmake -S ../llvm -B . \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_INSTALL_PREFIX="/" \
+            -DCMAKE_INSTALL_PREFIX="$WORK/destdir" \
             -DLLVM_ENABLE_PROJECTS=all \
             -DLLVM_ENABLE_RUNTIMES=all \
             -DLLVM_ENABLE_ZLIB=ON \
@@ -156,8 +156,8 @@ jobs:
       - name: Stage install
         run: |
           cd $WORK/llvm-project/build
-          DESTDIR=destdir ninja install
-
+          ninja install
+          cd $WORK
           if [ -d destdir/usr/bin ]; then
             mkdir -p destdir/bin
             mv destdir/usr/bin/* destdir/bin/
@@ -168,7 +168,7 @@ jobs:
       # -------------------------
       - name: Package
         run: |
-          cd $WORK/llvm-project/build
+          cd $WORK
           FILENAME="llvm-${LLVM_BRANCH}-${COMMIT_SHA}-linux-x86_64.tar.gz"
           tar -C destdir -czf "$FILENAME" .
           echo "PACKAGE_FILE=$FILENAME" >> $GITHUB_ENV
@@ -176,8 +176,6 @@ jobs:
       - name: Create tag for commit (if needed)
         if: github.event_name == 'workflow_dispatch'
         run: |
-          cd $WORK/llvm-project
-
           TAG="llvm-${LLVM_BRANCH}-${COMMIT_SHA}"
           echo "TAG_NAME=$TAG" >> $GITHUB_ENV
 
@@ -193,7 +191,7 @@ jobs:
           tag_name: ${{ env.TAG_NAME || github.ref_name }}
           name: LLVM ${{ env.TAG_NAME || github.ref_name }}
           prerelease: true
-          files: ${{ github.workspace }}/llvm-project/build/${{ env.PACKAGE_FILE }}
+          files: ${{ github.workspace }}/${{ env.PACKAGE_FILE }}
           body: |
             LLVM snapshot build
             Branch: ${{ env.LLVM_BRANCH }}
