@@ -53,15 +53,18 @@ jobs:
           if not "%REPO_COMMIT%"=="" git checkout %REPO_COMMIT%
           for /f %%i in ('git rev-parse --short HEAD') do echo COMMIT_SHA=%%i>>%GITHUB_ENV%
 
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+      - name: install qt 5.x
+        uses: jurplel/install-qt-action@v3
+        if: startsWith(matrix.qt_version, '5.')
         with:
           version: ${{ matrix.qt_version }}
-          host: windows
-          target: desktop
-          arch: ${{ matrix.qt_arch }}
-          modules: all
 
+      - name: install qt 6.x
+        uses: jurplel/install-qt-action@v3
+        if: startsWith(matrix.qt_version, '6.')
+        with:
+          version: ${{ matrix.qt_version }}
+          modules: 'qt5compat'
       - name: Configure
         shell: cmd
         run: |
