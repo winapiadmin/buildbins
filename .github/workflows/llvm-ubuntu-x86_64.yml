@@ -27,9 +27,12 @@ jobs:
       LLVM_REPO_URL: https://github.com/llvm/llvm-project.git
       WORK: ${{ github.workspace }}
       PY_PREFIX: ${{ github.workspace }}/python
+      TMPDIR: ${{ github.workspace }}/tmp
 
     steps:
-      # Building LLVM can take a whopping 60GB of space so there's... many steps for cleaning      
+      # -------------------------
+      # Free disk space (base image)
+      # -------------------------
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -40,7 +43,7 @@ jobs:
           large-packages: true
           docker-images: true
           swap-storage: true
-      
+
       - name: Disk space optimizer
         uses: hugoalh/disk-space-optimizer-ghaction@v0.8.0
         with:
@@ -48,10 +51,18 @@ jobs:
           docker_prune: "True"
           apt_clean: "True"
 
+      - name: Prepare workspace
+        run: |
+          mkdir -p "$TMPDIR"
+          mkdir -p "$WORK/destdir"
+
+      # -------------------------
+      # Install dependencies
+      # -------------------------
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y \
+          sudo apt install -y --no-install-recommends \
             build-essential \
             git \
             cmake \
@@ -62,39 +73,37 @@ jobs:
             zstd \
             libxml2-dev \
             libz3-dev
+          sudo apt clean
 
       # -------------------------
-      # Clone LLVM
+      # Clone LLVM (shallow)
       # -------------------------
       - name: Clone LLVM
         run: |
-          cd $WORK
+          cd "$WORK"
           git clone \
             --depth=1 \
             --branch "$LLVM_BRANCH" \
-            https://github.com/llvm/llvm-project.git
-      
+            "$LLVM_REPO_URL"
+
           if [ -n "$LLVM_COMMIT" ]; then
             cd llvm-project
             git fetch --depth=1 origin "$LLVM_COMMIT"
             git checkout "$LLVM_COMMIT"
           fi
 
-
       # -------------------------
       # Build Python (shared)
       # -------------------------
       - name: Build Python 3.12 (shared)
         run: |
-          cd $WORK
+          cd "$WORK"
           wget https://www.python.org/ftp/python/3.12.7/Python-3.12.7.tgz
           tar xf Python-3.12.7.tgz
           cd Python-3.12.7
 
-          make distclean || true
-
           ./configure \
-            --prefix=$PY_PREFIX \
+            --prefix="$PY_PREFIX" \
             --enable-shared \
             --with-ensurepip=install \
             CFLAGS="-O2 -fPIC" \
@@ -103,21 +112,21 @@ jobs:
           make -j$(nproc)
           make install
 
-          ls $PY_PREFIX/lib | grep libpython3.12.so
+          rm -rf "$WORK/Python-3.12.7" "$WORK/Python-3.12.7.tgz"
 
       # -------------------------
       # Configure LLVM
       # -------------------------
       - name: Configure LLVM
         run: |
-          cd $WORK/llvm-project
-          mkdir build; mkdir -p $WORK/destdir
+          cd "$WORK/llvm-project"
+          mkdir -p build
           cd build
 
           cmake -S ../llvm -B . \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_INSTALL_PREFIX="$WORK/destdir" \
+            -DCMAKE_INSTALL_PREFIX=/usr \
             -DLLVM_ENABLE_PROJECTS=all \
             -DLLVM_ENABLE_RUNTIMES=all \
             -DLLVM_ENABLE_ZLIB=ON \
@@ -126,27 +135,25 @@ jobs:
             -DLLVM_INCLUDE_DOCS=OFF \
             -DLLVM_INCLUDE_EXAMPLES=OFF \
             -DLLVM_INCLUDE_TESTS=OFF \
-            -DLLVM_INCLUDE_TOOLS=ON \
-            -DLLVM_INCLUDE_UTILS=ON \
             -DLLVM_OPTIMIZED_TABLEGEN=ON \
-            -DPython3_EXECUTABLE=$PY_PREFIX/bin/python3.12 \
-            -DPython3_LIBRARY=$PY_PREFIX/lib/libpython3.12.so \
-            -DPython3_INCLUDE_DIR=$PY_PREFIX/include/python3.12
+            -DPython3_EXECUTABLE="$PY_PREFIX/bin/python3.12" \
+            -DPython3_LIBRARY="$PY_PREFIX/lib/libpython3.12.so" \
+            -DPython3_INCLUDE_DIR="$PY_PREFIX/include/python3.12"
 
       # -------------------------
       # Build LLVM
       # -------------------------
       - name: Build LLVM
         run: |
-          cd $WORK/llvm-project/build
-          ninja
+          cd "$WORK/llvm-project/build"
+          ninja -j$(nproc --ignore=2)
 
       # -------------------------
       # Get commit info
       # -------------------------
       - name: Get commit info
         run: |
-          cd $WORK/llvm-project
+          cd "$WORK/llvm-project"
           COMMIT_SHA=$(git rev-parse --short HEAD)
           echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_ENV
 
@@ -155,12 +162,13 @@ jobs:
       # -------------------------
       - name: Stage install
         run: |
-          cd $WORK/llvm-project/build
-          ninja install
-          cd $WORK
-          if [ -d destdir/usr/bin ]; then
-            mkdir -p destdir/bin
-            mv destdir/usr/bin/* destdir/bin/
+          cd "$WORK/llvm-project/build"
+          DESTDIR="$WORK/destdir" ninja install
+
+          if [ -d "$WORK/destdir/usr/bin" ]; then
+            mkdir -p "$WORK/destdir/bin"
+            mv "$WORK/destdir/usr/bin/"* "$WORK/destdir/bin/"
+            rmdir "$WORK/destdir/usr/bin" || true
           fi
 
       # -------------------------
@@ -168,7 +176,7 @@ jobs:
       # -------------------------
       - name: Package
         run: |
-          cd $WORK
+          cd "$WORK"
           FILENAME="llvm-${LLVM_BRANCH}-${COMMIT_SHA}-linux-x86_64.tar.gz"
           tar -C destdir -czf "$FILENAME" .
           echo "PACKAGE_FILE=$FILENAME" >> $GITHUB_ENV
@@ -176,11 +184,11 @@ jobs:
       - name: Create tag for commit (if needed)
         if: github.event_name == 'workflow_dispatch'
         run: |
+          cd "$WORK/llvm-project"
           TAG="llvm-${LLVM_BRANCH}-${COMMIT_SHA}"
           echo "TAG_NAME=$TAG" >> $GITHUB_ENV
-
-          git tag "$TAG"
-          git push origin "$TAG"
+          git tag "$TAG" || true
+          git push origin "$TAG" || true
 
       # -------------------------
       # Publish Release
