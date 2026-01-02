@@ -1,4 +1,4 @@
-name: cutechess build for ubuntu-x86_64
+name: cutechess debug build for ubuntu-x86_64
 
 on:
   push:
@@ -24,7 +24,13 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-
+    strategy:
+      matrix:
+        include:
+          - qt_version: "5.15.2"
+            qt_label: "qt5"
+          - qt_version: "6.7.2"
+            qt_label: "qt6"
     env:
       REPO_BRANCH: ${{ github.event.inputs.repo_branch || github.ref_name }}
       REPO_COMMIT: ${{ github.event.inputs.repo_commit }}
@@ -32,6 +38,18 @@ jobs:
       WORK: ${{ github.workspace }}
 
     steps:
+      - name: install qt 5.x
+        uses: jurplel/install-qt-action@v3
+        if: startsWith(matrix.qt_version, '5.')
+        with:
+          version: ${{ matrix.qt_version }}
+
+      - name: install qt 6.x
+        uses: jurplel/install-qt-action@v3
+        if: startsWith(matrix.qt_version, '6.')
+        with:
+          version: ${{ matrix.qt_version }}
+          modules: 'qt5compat'
       - name: Install dependencies
         run: |
           sudo apt update
@@ -39,10 +57,7 @@ jobs:
             git \
             build-essential \
             cmake \
-            ninja-build \
-            qtbase5-dev \
-            qtbase5-dev-tools \
-            libqt5svg5-dev
+            ninja-build
           sudo apt clean
 
       - name: Clone cutechess
@@ -98,7 +113,7 @@ jobs:
       - name: Package
         run: |
           cd "$WORK"
-          FILENAME="cutechess-${REPO_BRANCH}-${COMMIT_SHA}-linux-x86_64-debug.tar.gz"
+          FILENAME="cutechess-${REPO_BRANCH}-${COMMIT_SHA}-linux-x86_64-debug-${{ matrix.qt_label }}.tar.gz"
           tar -C destdir -czf "$FILENAME" .
           echo "PACKAGE_FILE=$FILENAME" >> $GITHUB_ENV
 
@@ -118,6 +133,7 @@ jobs:
           name: cutechess ${{ env.TAG_NAME || github.ref_name }}
           files: ${{ github.workspace }}/${{ env.PACKAGE_FILE }}
           body: |
-            cutechess snapshot build (Debug + ASan)
+            cutechess snapshot build
+            Qt: ${{ matrix.qt_version }}
             Branch: ${{ env.REPO_BRANCH }}
             Commit: ${{ env.COMMIT_SHA }}
