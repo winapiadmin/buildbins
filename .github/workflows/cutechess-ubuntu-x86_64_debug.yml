@@ -1,0 +1,142 @@
+name: cutechess build for ubuntu-x86_64
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "cutechess repo URL"
+        required: false
+        default: "https://github.com/cutechess/cutechess"
+      repo_branch:
+        description: "cutechess repo branch (default: main)"
+        required: false
+        default: "main"
+      repo_commit:
+        description: "Commit SHA (leave empty for branch HEAD)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    env:
+      REPO_BRANCH: ${{ github.event.inputs.repo_branch || github.ref_name }}
+      REPO_COMMIT: ${{ github.event.inputs.repo_commit }}
+      REPO_URL: ${{ github.event.inputs.repo_url }}
+      WORK: ${{ github.workspace }}
+      PY_PREFIX: ${{ github.workspace }}/python
+
+    steps:
+      # Building LLVM can take a whopping 60GB of space so there's... many steps for cleaning      
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+      
+      - name: Disk space optimizer
+        uses: hugoalh/disk-space-optimizer-ghaction@v0.8.0
+        with:
+          operate_sudo: "True"
+          docker_prune: "True"
+          apt_clean: "True"
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install git build-essential cmake qtbase5-dev qtbase5-dev-tools libqt5svg5-dev mandoc
+      - name: Clone cutechess
+        run: |
+          cd $WORK
+          git clone \
+            --depth=1 \
+            --branch "$REPO_BRANCH" \
+            $REPO_URL \
+            cutechess
+          if [ -n "$REPO_COMMIT" ]; then
+            cd cutechess
+            git fetch --depth=1 origin "$REPO_COMMIT"
+            git checkout "$REPO_COMMIT"
+          fi
+      - name: Configure
+        run: |
+          cd $WORK/cutechess
+          mkdir build;cd build
+          cmake -S .. -B . \
+            -G Ninja \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address" \
+            -DCMAKE_C_FLAGS="-fsanitize=address" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX="$WORK/destdir"
+      
+      - name: Build
+        run: |
+          cd $WORK/cutechess/build
+          ninja
+          
+      # -------------------------
+      # Get commit info
+      # -------------------------
+      - name: Get commit info
+        run: |
+          cd $WORK/cutechess
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_ENV
+
+      # -------------------------
+      # Install (DESTDIR)
+      # -------------------------
+      - name: Stage install
+        run: |
+          cd $WORK/cutechess/build
+          ninja install
+          cd $WORK
+          if [ -d destdir/usr/bin ]; then
+            mkdir -p destdir/bin
+            mv destdir/usr/bin/* destdir/bin/
+          fi
+
+      # -------------------------
+      # Package
+      # -------------------------
+      - name: Package
+        run: |
+          cd $WORK
+          FILENAME="cutechess-${REPO_BRANCH}-${COMMIT_SHA}-linux-x86_64-debug.tar.gz"
+          tar -C destdir -czf "$FILENAME" .
+          echo "PACKAGE_FILE=$FILENAME" >> $GITHUB_ENV
+
+      - name: Create tag for commit (if needed)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="llvm-${REPO_BRANCH}-${COMMIT_SHA}"
+          echo "TAG_NAME=$TAG" >> $GITHUB_ENV
+
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      # -------------------------
+      # Publish Release
+      # -------------------------
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME || github.ref_name }}
+          name: LLVM ${{ env.TAG_NAME || github.ref_name }}
+          prerelease: true
+          files: ${{ github.workspace }}/${{ env.PACKAGE_FILE }}
+          body: |
+            cutechess snapshot build debug mode
+            Branch: ${{ env.LLVM_BRANCH }}
+            Commit: ${{ env.COMMIT_SHA }}
