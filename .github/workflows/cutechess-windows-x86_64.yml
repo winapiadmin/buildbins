@@ -102,7 +102,7 @@ jobs:
           name: cutechess Windows (${{ matrix.qt_label }})
           files: ${{ github.workspace }}/build/${{ env.PACKAGE_FILE }}
           body: |
-            cutechess snapshot build for Windows x86_64
+            cutechess snapshot build
             Qt: ${{ matrix.qt_version }}
             Branch: ${{ env.REPO_BRANCH }}
             Commit: ${{ env.COMMIT_SHA }}
