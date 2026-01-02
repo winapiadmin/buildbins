@@ -1,0 +1,201 @@
+name: cutechess build
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "cutechess repo URL"
+        required: false
+        default: "https://github.com/cutechess/cutechess"
+      repo_branch:
+        description: "cutechess repo branch"
+        required: false
+        default: "master"
+      repo_commit:
+        description: "Commit SHA (leave empty for branch HEAD)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+# ------------------------------------------------------------
+# 1. MATRIX BUILD (CI)
+# ------------------------------------------------------------
+  build:
+    name: "${{ matrix.os }} Qt ${{ matrix.qt_version }}"
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        qt_version: [5.15.2, 6.7.2]
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        exclude:
+          - os: macos-latest
+            qt_version: 5.15.2
+
+    steps:
+      - name: Checkout cutechess
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo_url }}
+          ref: ${{ inputs.repo_commit || inputs.repo_branch }}
+          path: cutechess
+
+      - name: Get branch + commit
+        run: |
+          echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          BRANCH=$(echo "${GITHUB_REF_NAME}" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          echo "BRANCH=$BRANCH" >> $GITHUB_ENV
+
+      - name: Install Qt 5
+        if: startsWith(matrix.qt_version, '5.')
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: ${{ matrix.qt_version }}
+
+      - name: Install Qt 6
+        if: startsWith(matrix.qt_version, '6.')
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: ${{ matrix.qt_version }}
+          modules: qt5compat
+
+      - name: Build (non-Windows)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir build && cd build
+          cmake ..
+          cmake --build .
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --config Release
+
+      - name: Package CI artifact
+        run: |
+          ART="cutechess-${BRANCH}-${SHORT_SHA}-${{ runner.os }}-qt${{ matrix.qt_version }}"
+          mkdir out
+          cp build/cutechess* out/ 2>/dev/null || true
+          tar -czf "$ART.tar.gz" -C out .
+          echo "ART=$ART.tar.gz" >> $GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ART }}
+          path: ${{ env.ART }}
+
+# ------------------------------------------------------------
+# 2. CREATE RELEASE (tags only)
+# ------------------------------------------------------------
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.rel.outputs.upload_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: rel
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: cutechess ${{ github.ref_name }}
+          draft: true
+
+# ------------------------------------------------------------
+# 3. LINUX APPIMAGE
+# ------------------------------------------------------------
+  appimage:
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential cmake ninja-build libfuse2 libxcb-cursor0
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: 6.7.2
+          modules: qt5compat
+
+      - name: Build + stage
+        run: |
+          mkdir build && cd build
+          cmake .. -DWITH_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build .
+          make install DESTDIR=AppDir
+
+      - name: Build AppImage
+        run: |
+          cd build
+          curl -LO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -LO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy*.AppImage
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage
+
+      - uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.release.outputs.upload_url }}
+          asset_path: build/CuteChess-x86_64.AppImage
+          asset_name: CuteChess-${{ github.ref_name }}-x86_64.AppImage
+          asset_content_type: application/octet-stream
+
+# ------------------------------------------------------------
+# 4. WINDOWS ZIP + SETUP
+# ------------------------------------------------------------
+  winsetup:
+    needs: release
+    runs-on: windows-latest
+
+    env:
+      ISDIR: 'C:\Program Files (x86)\Inno Setup 6'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: 6.7.2
+          modules: qt5compat
+
+      - name: Build
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          mkdir build && cd build
+          cmake .. -DWITH_TESTS=OFF
+          cmake --build . --config Release
+
+      - name: Create installer
+        shell: powershell
+        run: |
+          & "$env:ISDIR\iscc.exe" dist\windows_setup.iss
+
+      - uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.release.outputs.upload_url }}
+          asset_path: dist/cutechess-win64.exe
+          asset_name: cutechess-${{ github.ref_name }}-win64.exe
+          asset_content_type: application/octet-stream
