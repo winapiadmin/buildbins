@@ -60,7 +60,7 @@ jobs:
           host: windows
           target: desktop
           arch: ${{ matrix.qt_arch }}
-          modules: qtbase
+          modules: all
 
       - name: Configure
         shell: cmd
