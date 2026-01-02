@@ -133,7 +133,7 @@ jobs:
       - name: Package CI artifact
         shell: bash
         working-directory: src
-        if: matrix.os != 'windows-latest"
+        if: matrix.os != 'windows-latest'
         run: |
           ART="cutechess-${BRANCH}-${SHORT_SHA}-${ARCH}-qt${{ matrix.qt_version }}"
           mkdir -p out
@@ -151,7 +151,7 @@ jobs:
       - name: Package CI artifact (Windows)
         shell: pwsh
         working-directory: src
-        if: matrix.os == 'windows-latest"
+        if: matrix.os == 'windows-latest'
         run: |
           $ART = "cutechess-$env:BRANCH-$env:SHORT_SHA-$env:ARCH-qt${{ matrix.qt_version }}"
           New-Item -ItemType Directory -Force out | Out-Null
