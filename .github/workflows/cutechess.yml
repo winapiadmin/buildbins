@@ -204,7 +204,7 @@ jobs:
           TAG="cutechess-${SANITIZED_BRANCH}-${SHORT_SHA}"
           echo "Computed tag: $TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
+          echo "VERSION=$TAG" >> $GITHUB_ENV
       - name: Create & push tag in this repo (repo A)
         id: make_tag
         shell: bash
@@ -268,40 +268,36 @@ jobs:
       - name: Build AppDir
         shell: bash
         run: |
-          mkdir -p AppDir/usr/bin
-          BIN=$(find artifact -type f -name "cutechess*" -executable | head -n1)
-          cp "$BIN" AppDir/usr/bin/cutechess
-  
-          cat > AppDir/cutechess.desktop <<EOF
-          [Desktop Entry]
-          Type=Application
-          Name=CuteChess
-          Exec=cutechess
-          Icon=cutechess
-          Categories=Game;
-          EOF
-  
-          # placeholder icon (replace later if you want)
-          install -Dm644 /usr/share/icons/hicolor/256x256/apps/utilities-terminal.png \
-            AppDir/cutechess.png
-  
+          mkdir -p AppDir
+          cp -R artifact AppDir
+          REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cutechess/cutechess' }}"
+          REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
+          echo "Cloning $REPO_URL @ $REPO_REF"
+          rm -rf tmpsrc
+          git clone --depth=1 "$REPO_URL" tmpsrc
+          cd tmpsrc || exit 1
+          # be forgiving: try to check out requested ref if it's a commit / tag / branch
+          git checkout "$REPO_REF" 2>/dev/null || (git fetch --tags --all && git checkout "$REPO_REF")
       - name: Build AppImage
         shell: bash
         run: |
           curl -LO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           curl -LO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy*.AppImage
-  
           ./linuxdeploy-x86_64.AppImage \
-            --appdir AppDir \
-            --plugin qt \
-            --output appimage
-  
-      - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
+          --appdir AppDir --plugin qt --output appimage \
+          --custom-apprun=tmpsrc/dist/appimage/CuteChess-AppRun --icon-file=tmpsrc/projects/gui/res/icons/cutechess_256x256.png \
+          --executable AppDir/artifact/cutechess --executable AppDir/artifact/cutechess-cli \
+          --desktop-file tmpsrc/dist/linux/cutechess.desktop
+          
+      - name: Upload Windows installer to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: CuteChess-AppImage
-          path: CuteChess-*.AppImage
+          upload_url: ${{ needs.release.outputs.upload_url }}
+          asset_path: ${{ env.VERSION }}-x86_64.AppImage
+          asset_name: ${{ env.VERSION }}-x86_64.AppImage
 
 # ------------------------------------------------------------
 # 4. WINDOWS ZIP + SETUP (runs on tag releases)
