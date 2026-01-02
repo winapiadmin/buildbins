@@ -132,7 +132,7 @@ jobs:
 
       - name: Package CI artifact
         shell: bash
-        working-directory: src
+        working-directory: ${{ github.workspace }}/src
         if: matrix.os != 'windows-latest'
         run: |
           ART="cutechess-${BRANCH}-${SHORT_SHA}-${ARCH}-qt${{ matrix.qt_version }}"
@@ -150,7 +150,7 @@ jobs:
 
       - name: Package CI artifact (Windows)
         shell: pwsh
-        working-directory: src
+        working-directory: ${{ github.workspace }}/src
         if: matrix.os == 'windows-latest'
         run: |
           $ART = "cutechess-$env:BRANCH-$env:SHORT_SHA-$env:ARCH-qt${{ matrix.qt_version }}"
@@ -171,7 +171,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ART }}
-          path: ${{ github.workspace }}/${{ env.ART }}
+          path: ${{ github.workspace }}/src/${{ env.ART }}
 
 # ------------------------------------------------------------
 # 2. CREATE RELEASE (tags only)
