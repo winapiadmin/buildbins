@@ -11,9 +11,9 @@ on:
         required: false
         default: "https://github.com/cutechess/cutechess"
       repo_branch:
-        description: "cutechess repo branch (default: main)"
+        description: "cutechess repo branch"
         required: false
-        default: "main"
+        default: "master"
       repo_commit:
         description: "Commit SHA (leave empty for branch HEAD)"
         required: false
@@ -33,25 +33,6 @@ jobs:
       PY_PREFIX: ${{ github.workspace }}/python
 
     steps:
-      # Building LLVM can take a whopping 60GB of space so there's... many steps for cleaning      
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-      
-      - name: Disk space optimizer
-        uses: hugoalh/disk-space-optimizer-ghaction@v0.8.0
-        with:
-          operate_sudo: "True"
-          docker_prune: "True"
-          apt_clean: "True"
-
       - name: Install dependencies
         run: |
           sudo apt update
