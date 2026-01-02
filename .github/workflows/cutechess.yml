@@ -133,6 +133,7 @@ jobs:
       - name: Package CI artifact
         shell: bash
         working-directory: src
+        if: matrix.os != 'windows-latest"
         run: |
           ART="cutechess-${BRANCH}-${SHORT_SHA}-${ARCH}-qt${{ matrix.qt_version }}"
           mkdir -p out
@@ -146,6 +147,25 @@ jobs:
           cp -v COPYING out/ 2>/dev/null || true
           tar -czf "$ART.tar.gz" -C out .
           echo "ART=$ART.tar.gz" >> $GITHUB_ENV
+
+      - name: Package CI artifact (Windows)
+        shell: pwsh
+        working-directory: src
+        if: matrix.os == 'windows-latest"
+        run: |
+          $ART = "cutechess-$env:BRANCH-$env:SHORT_SHA-$env:ARCH-qt${{ matrix.qt_version }}"
+          New-Item -ItemType Directory -Force out | Out-Null
+        
+          if (Test-Path build) {
+            Get-ChildItem build -Filter "cutechess*.exe" -Recurse -ErrorAction SilentlyContinue |
+              Copy-Item -Destination out -Force
+          }
+        
+          Copy-Item README* -Destination out -ErrorAction SilentlyContinue
+          Copy-Item COPYING -Destination out -ErrorAction SilentlyContinue
+        
+          Compress-Archive -Path out\* -DestinationPath "$ART.zip" -Force
+          "ART=$ART.zip" | Out-File -Append $env:GITHUB_ENV
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
