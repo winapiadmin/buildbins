@@ -1,9 +1,6 @@
 name: cutechess build
 
 on:
-  push:
-    tags:
-      - "*"
   workflow_dispatch:
     inputs:
       repo_url:
@@ -172,15 +169,69 @@ jobs:
         with:
           name: ${{ env.ART }}
           path: ${{ github.workspace }}/src/${{ env.ART }}
+# ------------------------------------------------------------
+# 1.5 CREATE TAG (after successful build)
+# ------------------------------------------------------------
+  create_tag:
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.make_tag.outputs.tag }}
+
+    steps:
+      - name: Checkout this repository (repo A)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Clone upstream repo (compute branch + sha)
+        shell: bash
+        id: compute
+        run: |
+          set -e
+          REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cutechess/cutechess' }}"
+          REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
+          echo "Cloning $REPO_URL @ $REPO_REF"
+          rm -rf tmpsrc
+          git clone --depth=1 "$REPO_URL" tmpsrc
+          cd tmpsrc || exit 1
+          # be forgiving: try to check out requested ref if it's a commit / tag / branch
+          git checkout "$REPO_REF" 2>/dev/null || (git fetch --tags --all && git checkout "$REPO_REF")
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD || echo "$GITHUB_REF_NAME")
+          SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          TAG="cutechess-${SANITIZED_BRANCH}-${SHORT_SHA}"
+          echo "Computed tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create & push tag in this repo (repo A)
+        id: make_tag
+        shell: bash
+        run: |
+          set -e
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          TAG="${{ steps.compute.outputs.tag }}"
+          # Avoid recreating the same tag
+          if git rev-parse --verify "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — skipping push"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
 # ------------------------------------------------------------
 # 2. CREATE RELEASE (tags only)
 # ------------------------------------------------------------
   release:
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: create_tag
     runs-on: ubuntu-latest
     outputs:
       upload_url: ${{ steps.rel.outputs.upload_url }}
+      tag: ${{ needs.create_tag.outputs.tag }}
 
     steps:
       - uses: actions/checkout@v4
@@ -190,69 +241,67 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.ref_name }}
-          release_name: cutechess ${{ github.ref_name }}
+          tag_name: ${{ needs.create_tag.outputs.tag }}
+          release_name: "cutechess in ${{ needs.create_tag.outputs.tag }}"
           draft: true
 
 # ------------------------------------------------------------
 # 3. LINUX APPIMAGE (runs on tag releases)
 # ------------------------------------------------------------
   appimage:
-    needs: release
+    needs: build
     runs-on: ubuntu-latest
-
+  
     steps:
-      - name: Checkout target repo for release
-        shell: bash
-        run: |
-          REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cutechess/cutechess' }}"
-          REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
-          git clone "$REPO_URL" src
-          cd src
-          git fetch --all --tags --depth=1 || true
-          git checkout "$REPO_REF" || git checkout -b tmp "$REPO_REF" || true
-        env:
-          GIT_TERMINAL_PROMPT: 0
-
-      - name: Install deps
+      - name: Download Linux Qt6 artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*linux-x86_64-qt6*"
+          merge-multiple: true
+          path: artifact
+  
+      - name: Install AppImage deps
         run: |
           sudo apt update
-          sudo apt install -y build-essential cmake ninja-build libfuse2 libxcb-cursor0
-
-      - name: Install Qt 6
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: 6.7.2
-          modules: qt5compat
-
-      - name: Build + stage
+          sudo apt install -y libfuse2 patchelf
+  
+      - name: Build AppDir
         shell: bash
-        working-directory: src
         run: |
-          mkdir -p build
-          cd build
-          cmake .. -DWITH_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr -G Ninja
-          cmake --build . -- -j$(nproc)
-          make install DESTDIR=AppDir
-
+          mkdir -p AppDir/usr/bin
+          BIN=$(find artifact -type f -name "cutechess*" -executable | head -n1)
+          cp "$BIN" AppDir/usr/bin/cutechess
+  
+          cat > AppDir/cutechess.desktop <<EOF
+          [Desktop Entry]
+          Type=Application
+          Name=CuteChess
+          Exec=cutechess
+          Icon=cutechess
+          Categories=Game;
+          EOF
+  
+          # placeholder icon (replace later if you want)
+          install -Dm644 /usr/share/icons/hicolor/256x256/apps/utilities-terminal.png \
+            AppDir/cutechess.png
+  
       - name: Build AppImage
         shell: bash
-        working-directory: src/build
         run: |
           curl -LO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           curl -LO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy*.AppImage
-          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage
-
-      - name: Upload AppImage to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --plugin qt \
+            --output appimage
+  
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ needs.release.outputs.upload_url }}
-          asset_path: src/build/CuteChess-x86_64.AppImage
-          asset_name: CuteChess-${{ github.ref_name }}-x86_64.AppImage
-          asset_content_type: application/octet-stream
+          name: CuteChess-AppImage
+          path: CuteChess-*.AppImage
 
 # ------------------------------------------------------------
 # 4. WINDOWS ZIP + SETUP (runs on tag releases)
