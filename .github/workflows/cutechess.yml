@@ -284,6 +284,7 @@ jobs:
           curl -LO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           curl -LO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy*.AppImage
+          ls -R artifact
           ./linuxdeploy-x86_64.AppImage \
           --appdir AppDir --plugin qt --output appimage \
           --custom-apprun=tmpsrc/dist/appimage/CuteChess-AppRun --icon-file=tmpsrc/projects/gui/res/icons/cutechess_256x256.png \
@@ -342,11 +343,12 @@ jobs:
         shell: powershell
         working-directory: src
         run: |
-          if (-Not (Test-Path "$env:ISDIR\iscc.exe")) {
-            Write-Host "Inno Setup not found at $env:ISDIR — ensure Inno is installed on the runner or provide path"
-            exit 1
+          $Iscc = Join-Path $env:ISDIR 'iscc.exe'
+          if (-Not (Test-Path $Iscc)) {
+              Write-Host "Inno Setup not found at $Iscc"
+              exit 1
           }
-          & "$env:ISDIR\iscc.exe" dist\windows_setup.iss
+          & $Iscc dist\windows_setup.iss
 
       - name: Upload Windows installer to release
         uses: actions/upload-release-asset@v1
