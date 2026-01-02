@@ -30,70 +30,74 @@ jobs:
       REPO_COMMIT: ${{ github.event.inputs.repo_commit }}
       REPO_URL: ${{ github.event.inputs.repo_url }}
       WORK: ${{ github.workspace }}
-      PY_PREFIX: ${{ github.workspace }}/python
 
     steps:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install git build-essential cmake qtbase5-dev qtbase5-dev-tools libqt5svg5-dev mandoc
+          sudo apt install -y --no-install-recommends \
+            git \
+            build-essential \
+            cmake \
+            ninja-build \
+            qtbase5-dev \
+            qtbase5-dev-tools \
+            libqt5svg5-dev
+          sudo apt clean
+
       - name: Clone cutechess
         run: |
-          cd $WORK
+          cd "$WORK"
           git clone \
             --depth=1 \
             --branch "$REPO_BRANCH" \
-            $REPO_URL \
+            "$REPO_URL" \
             cutechess
+
           if [ -n "$REPO_COMMIT" ]; then
             cd cutechess
             git fetch --depth=1 origin "$REPO_COMMIT"
             git checkout "$REPO_COMMIT"
           fi
+
       - name: Configure
         run: |
-          cd $WORK/cutechess
-          mkdir build;cd build
+          cd "$WORK/cutechess"
+          mkdir -p build
+          cd build
+
           cmake -S .. -B . \
             -G Ninja \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address" \
-            -DCMAKE_C_FLAGS="-fsanitize=address" \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_INSTALL_PREFIX="$WORK/destdir"
-      
+            -DCMAKE_C_FLAGS_DEBUG="-fsanitize=address" \
+            -DCMAKE_CXX_FLAGS_DEBUG="-fsanitize=address" \
+            -DCMAKE_INSTALL_PREFIX=/usr
+
       - name: Build
         run: |
-          cd $WORK/cutechess/build
+          cd "$WORK/cutechess/build"
           ninja
-          
-      # -------------------------
-      # Get commit info
-      # -------------------------
+
       - name: Get commit info
         run: |
-          cd $WORK/cutechess
+          cd "$WORK/cutechess"
           COMMIT_SHA=$(git rev-parse --short HEAD)
           echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_ENV
 
-      # -------------------------
-      # Install (DESTDIR)
-      # -------------------------
       - name: Stage install
         run: |
-          cd $WORK/cutechess/build
-          ninja install
-          cd $WORK
-          if [ -d destdir/usr/bin ]; then
-            mkdir -p destdir/bin
-            mv destdir/usr/bin/* destdir/bin/
+          cd "$WORK/cutechess/build"
+          DESTDIR="$WORK/destdir" ninja install
+
+          if [ -d "$WORK/destdir/usr/bin" ]; then
+            mkdir -p "$WORK/destdir/bin"
+            mv "$WORK/destdir/usr/bin/"* "$WORK/destdir/bin/"
+            rmdir "$WORK/destdir/usr/bin" || true
           fi
 
-      # -------------------------
-      # Package
-      # -------------------------
       - name: Package
         run: |
-          cd $WORK
+          cd "$WORK"
           FILENAME="cutechess-${REPO_BRANCH}-${COMMIT_SHA}-linux-x86_64-debug.tar.gz"
           tar -C destdir -czf "$FILENAME" .
           echo "PACKAGE_FILE=$FILENAME" >> $GITHUB_ENV
@@ -101,23 +105,19 @@ jobs:
       - name: Create tag for commit (if needed)
         if: github.event_name == 'workflow_dispatch'
         run: |
-          TAG="llvm-${REPO_BRANCH}-${COMMIT_SHA}"
+          cd "$WORK/cutechess"
+          TAG="cutechess-${REPO_BRANCH}-${COMMIT_SHA}"
           echo "TAG_NAME=$TAG" >> $GITHUB_ENV
+          git tag "$TAG" || true
+          git push origin "$TAG" || true
 
-          git tag "$TAG"
-          git push origin "$TAG"
-
-      # -------------------------
-      # Publish Release
-      # -------------------------
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME || github.ref_name }}
-          name: LLVM ${{ env.TAG_NAME || github.ref_name }}
-          prerelease: true
+          name: cutechess ${{ env.TAG_NAME || github.ref_name }}
           files: ${{ github.workspace }}/${{ env.PACKAGE_FILE }}
           body: |
-            cutechess snapshot build debug mode
-            Branch: ${{ env.LLVM_BRANCH }}
+            cutechess snapshot build (Debug + ASan)
+            Branch: ${{ env.REPO_BRANCH }}
             Commit: ${{ env.COMMIT_SHA }}
