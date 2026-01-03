@@ -179,11 +179,7 @@ jobs:
       tag: ${{ steps.make_tag.outputs.tag }}
 
     steps:
-      - name: Checkout this repository (repo A)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: true
+      - uses: actions/checkout@v4
 
       - name: Clone upstream repo (compute branch + sha)
         shell: bash
@@ -245,117 +241,180 @@ jobs:
           release_name: "cutechess in ${{ needs.create_tag.outputs.tag }}"
           draft: true
 
-# ------------------------------------------------------------
-# 3. LINUX APPIMAGE (runs on tag releases)
-# ------------------------------------------------------------
-  appimage:
-    needs: release
-    runs-on: ubuntu-latest
-  
-    steps:
-      - name: Download Linux Qt6 artifact
-        uses: actions/download-artifact@v4
-        with:
-          pattern: "*linux-x86_64*"
-          merge-multiple: true
-          path: artifact
-  
-      - name: Install AppImage deps
-        run: |
-          sudo apt update
-          sudo apt install -y libfuse2 patchelf
-  
-      - name: Build AppDir
-        shell: bash
-        run: |
-          mkdir -p AppDir
-          cp -R artifact AppDir
-          REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cutechess/cutechess' }}"
-          REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
-          echo "Cloning $REPO_URL @ $REPO_REF"
-          rm -rf tmpsrc
-          git clone --depth=1 "$REPO_URL" tmpsrc
-          cd tmpsrc || exit 1
-          # be forgiving: try to check out requested ref if it's a commit / tag / branch
-          git checkout "$REPO_REF" 2>/dev/null || (git fetch --tags --all && git checkout "$REPO_REF")
-      - name: Build AppImage
-        shell: bash
-        run: |
-          curl -LO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -LO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-          chmod +x linuxdeploy*.AppImage
-          ls -R artifact
-          ./linuxdeploy-x86_64.AppImage \
-          --appdir AppDir --plugin qt --output appimage \
-          --custom-apprun=tmpsrc/dist/appimage/CuteChess-AppRun --icon-file=tmpsrc/projects/gui/res/icons/cutechess_256x256.png \
-          --executable AppDir/artifact/cutechess --executable AppDir/artifact/cutechess-cli \
-          --desktop-file tmpsrc/dist/linux/cutechess.desktop
-          
-      - name: Upload Windows installer to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.release.outputs.upload_url }}
-          asset_path: ${{ env.VERSION }}-x86_64.AppImage
-          asset_name: ${{ env.VERSION }}-x86_64.AppImage
+  linuxrel:
+      needs: release
+      name: "${{ matrix.os }} Qt ${{ matrix.qt_version }}"
+      runs-on: ${{ matrix.os }}
+      strategy:
+        matrix:
+          qt_version: [6.7.2]
+          os: [ubuntu-latest]
+      steps:
+          - name: Checkout target repository (clone by URL)
+            shell: bash
+            run: |
+              REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cutechess/cutechess' }}"
+              REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
+              echo "Cloning $REPO_URL"
+              git clone "$REPO_URL" src
+              cd src
+              # Try to check out commit, branch or tag. Be forgiving: fetch refs if needed.
+              set -e
+              if [ -n "${{ github.event.inputs.repo_commit }}" ]; then
+                echo "Checking out commit $REPO_REF"
+                git fetch --depth=1 origin "$REPO_REF" || true
+                git checkout "$REPO_REF"
+              else
+                echo "Checking out ref $REPO_REF"
+                git checkout "$REPO_REF" 2>/dev/null || (git fetch --tags --all && git checkout "$REPO_REF")
+              fi
+            env:
+              # keep runner quiet about any GIT_TRACE etc.
+              GIT_TERMINAL_PROMPT: 0
 
-# ------------------------------------------------------------
-# 4. WINDOWS ZIP + SETUP (runs on tag releases)
-# ------------------------------------------------------------
-  winsetup:
-    needs: release
-    runs-on: windows-latest
+          - name: install qt 6.x
+            uses: jurplel/install-qt-action@v3
+            with:
+              version: ${{ matrix.qt_version }}
+              modules: 'qt5compat'
 
-    env:
-      ISDIR: 'C:\Program Files (x86)\Inno Setup 6'
+          - name: build cute chess
+            run: |
+                mkdir build
+                cd build
+                cmake .. -DWITH_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr
+                cmake --build .
+                make install DESTDIR=AppDir
 
-    steps:
-      - name: Checkout target repo for release (Windows)
-        shell: bash
-        run: |
-          REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cutechess/cutechess' }}"
-          REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
-          git clone "$REPO_URL" src
-          cd src
-          git fetch --all --tags --depth=1 || true
-          git checkout "$REPO_REF" || git checkout -b tmp "$REPO_REF" || true
-        env:
-          GIT_TERMINAL_PROMPT: 0
+          - name: download appimage tools
+            run: |
+              sudo apt install libfuse2 libxcb-cursor0
+              cd build
+              curl -fsSLO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+              curl -fsLSO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+              chmod +x linuxdeploy-*.AppImage
 
-      - name: Install Qt 6
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: 6.7.2
-          modules: qt5compat
+          - name: set version
+            run: |
+              SHORT_SHA=$(git rev-parse --short HEAD)
+              BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD || echo "$GITHUB_REF_NAME")
+              SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+              TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
+              echo "VERSION=$TAG" >> $GITHUB_ENV
 
-      - name: Build (Windows, release)
-        shell: cmd
-        working-directory: src
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          mkdir build
-          cd build
-          cmake .. -DWITH_TESTS=OFF -G "Ninja"
-          cmake --build . --config Release
+          - name: build appimage
+            run: |
+              cd build
+              ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage --custom-apprun=../dist/appimage/CuteChess-AppRun --icon-file=../projects/gui/res/icons/cutechess_256x256.png \
+              --executable AppDir/usr/bin/cutechess \
+              --executable AppDir/usr/bin/cutechess-cli
 
-      - name: Create installer (Inno Setup)
-        shell: powershell
-        working-directory: src
-        run: |
-          $Iscc = Join-Path $env:ISDIR 'iscc.exe'
-          if (-Not (Test-Path $Iscc)) {
-              Write-Host "Inno Setup not found at $Iscc"
-              exit 1
-          }
-          & $Iscc dist\windows_setup.iss
+          - name: upload release asset
+            uses: actions/upload-release-asset@v1
+            env:
+              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            with:
+              upload_url: ${{ needs.release.outputs.upload_url }}
+              asset_path: build/Cute_Chess-${{ env.VERSION }}-x86_64.AppImage
+              asset_name: Cute_Chess-${{ env.VERSION }}-x86_64.AppImage
+              asset_content_type: application/octet-stream
 
-      - name: Upload Windows installer to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.release.outputs.upload_url }}
-          asset_path: src/dist/cutechess-win64.exe
-          asset_name: cutechess-${{ github.ref_name }}-win64.exe
-          asset_content_type: application/octet-stream
+  winrel:
+      needs: release
+      name: "${{ matrix.os }} Qt ${{ matrix.qt_version }}"
+      runs-on: ${{ matrix.os }}
+      env:
+        VCDIR: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise'
+        ISDIR: 'C:\Program Files (x86)\Inno Setup 6'
+      strategy:
+        matrix:
+          qt_version: [6.7.2]
+          os: [windows-latest]
+      steps:
+          - name: Checkout target repository (clone by URL)
+            shell: bash
+            run: |
+              REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cutechess/cutechess' }}"
+              REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
+              echo "Cloning $REPO_URL"
+              git clone "$REPO_URL" src
+              cd src
+              # Try to check out commit, branch or tag. Be forgiving: fetch refs if needed.
+              set -e
+              if [ -n "${{ github.event.inputs.repo_commit }}" ]; then
+                echo "Checking out commit $REPO_REF"
+                git fetch --depth=1 origin "$REPO_REF" || true
+                git checkout "$REPO_REF"
+              else
+                echo "Checking out ref $REPO_REF"
+                git checkout "$REPO_REF" 2>/dev/null || (git fetch --tags --all && git checkout "$REPO_REF")
+              fi
+            env:
+              # keep runner quiet about any GIT_TRACE etc.
+              GIT_TERMINAL_PROMPT: 0
+
+          - name: install qt 6.x
+            uses: jurplel/install-qt-action@v3
+            with:
+              version: ${{ matrix.qt_version }}
+              modules: 'qt5compat'
+
+          - name: build cute chess
+            run: |
+                mkdir build
+                cd build
+                cmake .. -DWITH_TESTS=OFF
+                cmake --build . --config release
+
+          - name: set version
+            shell: bash
+            run: |
+              SHORT_SHA=$(git rev-parse --short HEAD)
+              BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD || echo "$GITHUB_REF_NAME")
+              SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+              TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
+              echo "VERSION=$TAG" >> $GITHUB_ENV
+
+          - name: create a release zip file
+            run: |
+              mkdir cutechess-$env:VERSION-win64
+              cd cutechess-$env:VERSION-win64
+              cp ..\build\Release\cutechess.exe .
+              cp ..\build\Release\cutechess-cli.exe .
+              cp ..\docs\cutechess-cli.6.html .
+              cp ..\docs\cutechess-cli.6.txt .
+              cp ..\docs\cutechess-engines.json.5.html .
+              cp ..\docs\cutechess-engines.json.5.txt .
+              cp ..\COPYING .
+              cp "$env:VCDIR\VC\Redist\MSVC\v143\vc_redist.x64.exe" .
+              cp "$env:Qt6_Dir\bin\Qt6Core.dll" .
+              cp "$env:Qt6_Dir\bin\Qt6Gui.dll" .
+              cp "$env:Qt6_Dir\bin\Qt6Svg.dll" .
+              cp "$env:Qt6_Dir\bin\Qt6PrintSupport.dll" .
+              cp "$env:Qt6_Dir\bin\Qt6Widgets.dll" .
+              cp "$env:Qt6_Dir\bin\Qt6ConCurrent.dll" .
+              cp "$env:Qt6_Dir\bin\Qt6Core5Compat.dll" .
+              mkdir platforms
+              cp "$env:Qt6_Dir\plugins\platforms\qwindows.dll" platforms\
+              mkdir styles
+              cp "$env:Qt6_Dir\plugins\styles\qmodernwindowsstyle.dll" styles\
+              mkdir plugins
+              mkdir plugins\iconengines
+              cp "$env:Qt6_Dir\plugins\iconengines\qsvgicon.dll" plugins\iconengines
+              mkdir plugins\imageformats
+              cp "$env:Qt6_Dir\plugins\imageformats\qsvg.dll" plugins\imageformats
+              cd ..
+
+          - name: create an installer
+            run: |
+              & "$env:ISDIR\iscc.exe" /DMyAppVersion=$env:VERSION /DQtLibPath=$env:Qt6_Dir /DMSVCPath=$env:VCDIR /DCuteChessPath=$env:GITHUB_WORKSPACE dist\windows_setup.iss
+
+          - name: upload installer release asset
+            uses: actions/upload-release-asset@v1
+            env:
+              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            with:
+              upload_url: ${{ needs.release.outputs.upload_url }}
+              asset_path: dist/cutechess-${{ env.VERSION }}-win64.exe
+              asset_name: cutechess-${{ env.VERSION }}-win64.exe
+              asset_content_type: application/octet-stream
