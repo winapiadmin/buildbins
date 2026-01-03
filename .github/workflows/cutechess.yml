@@ -382,7 +382,7 @@ jobs:
               echo "VERSION=$TAG" >> $GITHUB_ENV
 
           - name: create a release zip file
-            working-directory: src/build
+            working-directory: src
             run: |
               mkdir cutechess-$env:VERSION-win64
               cd cutechess-$env:VERSION-win64
@@ -423,6 +423,6 @@ jobs:
               GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
             with:
               upload_url: ${{ needs.release.outputs.upload_url }}
-              asset_path: dist/cutechess-${{ env.VERSION }}-win64.exe
+              asset_path: src/dist/cutechess-${{ env.VERSION }}-win64.exe
               asset_name: cutechess-${{ env.VERSION }}-win64.exe
               asset_content_type: application/octet-stream
