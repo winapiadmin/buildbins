@@ -173,7 +173,6 @@ jobs:
 # 1.5 CREATE TAG (after successful build)
 # ------------------------------------------------------------
   create_tag:
-    needs: build
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.make_tag.outputs.tag }}
