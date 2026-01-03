@@ -278,6 +278,7 @@ jobs:
               modules: 'qt5compat'
 
           - name: set version
+            working-directory: src 
             run: |
               SHORT_SHA=$(git rev-parse --short HEAD)
               BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD || echo "$GITHUB_REF_NAME")
