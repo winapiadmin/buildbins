@@ -278,6 +278,7 @@ jobs:
               modules: 'qt5compat'
 
           - name: build cute chess
+            working-directory: src 
             run: |
                 mkdir build
                 cd build
@@ -302,6 +303,7 @@ jobs:
               echo "VERSION=$TAG" >> $GITHUB_ENV
 
           - name: build appimage
+            working-directory: src
             run: |
               cd build
               ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage --custom-apprun=../dist/appimage/CuteChess-AppRun --icon-file=../projects/gui/res/icons/cutechess_256x256.png \
@@ -314,7 +316,7 @@ jobs:
               GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
             with:
               upload_url: ${{ needs.release.outputs.upload_url }}
-              asset_path: build/Cute_Chess-${{ env.VERSION }}-x86_64.AppImage
+              asset_path: src/build/Cute_Chess-${{ env.VERSION }}-x86_64.AppImage
               asset_name: Cute_Chess-${{ env.VERSION }}-x86_64.AppImage
               asset_content_type: application/octet-stream
 
@@ -359,6 +361,7 @@ jobs:
               modules: 'qt5compat'
 
           - name: build cute chess
+            working-directory: src
             run: |
                 mkdir build
                 cd build
@@ -367,6 +370,7 @@ jobs:
 
           - name: set version
             shell: bash
+            working-directory: src
             run: |
               SHORT_SHA=$(git rev-parse --short HEAD)
               BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD || echo "$GITHUB_REF_NAME")
@@ -375,6 +379,7 @@ jobs:
               echo "VERSION=$TAG" >> $GITHUB_ENV
 
           - name: create a release zip file
+            working-directory: src/build
             run: |
               mkdir cutechess-$env:VERSION-win64
               cd cutechess-$env:VERSION-win64
@@ -405,6 +410,7 @@ jobs:
               cd ..
 
           - name: create an installer
+            working-directory: src
             run: |
               & "$env:ISDIR\iscc.exe" /DMyAppVersion=$env:VERSION /DQtLibPath=$env:Qt6_Dir /DMSVCPath=$env:VCDIR /DCuteChessPath=$env:GITHUB_WORKSPACE dist\windows_setup.iss
 
