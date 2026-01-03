@@ -277,15 +277,6 @@ jobs:
               version: ${{ matrix.qt_version }}
               modules: 'qt5compat'
 
-          - name: download appimage tools
-            working-directory: src
-            run: |
-              sudo apt install libfuse2 libxcb-cursor0
-              cd build
-              curl -fsSLO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-              curl -fsLSO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-              chmod +x linuxdeploy-*.AppImage
-              
           - name: set version
             run: |
               SHORT_SHA=$(git rev-parse --short HEAD)
@@ -303,6 +294,16 @@ jobs:
                 cmake --build .
                 make install DESTDIR=AppDir
 
+          - name: download appimage tools
+            working-directory: src
+            run: |
+              sudo apt install libfuse2 libxcb-cursor0
+              mkdir build || true
+              cd build
+              curl -fsSLO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+              curl -fsLSO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+              chmod +x linuxdeploy-*.AppImage
+              
           - name: build appimage
             working-directory: src
             run: |
