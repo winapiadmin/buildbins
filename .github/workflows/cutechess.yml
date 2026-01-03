@@ -277,6 +277,23 @@ jobs:
               version: ${{ matrix.qt_version }}
               modules: 'qt5compat'
 
+          - name: download appimage tools
+            working-directory: src
+            run: |
+              sudo apt install libfuse2 libxcb-cursor0
+              cd build
+              curl -fsSLO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+              curl -fsLSO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+              chmod +x linuxdeploy-*.AppImage
+              
+          - name: set version
+            run: |
+              SHORT_SHA=$(git rev-parse --short HEAD)
+              BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD || echo "$GITHUB_REF_NAME")
+              SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+              TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
+              echo "VERSION=$TAG" >> $GITHUB_ENV
+
           - name: build cute chess
             working-directory: src 
             run: |
@@ -285,22 +302,6 @@ jobs:
                 cmake .. -DWITH_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr
                 cmake --build .
                 make install DESTDIR=AppDir
-
-          - name: download appimage tools
-            run: |
-              sudo apt install libfuse2 libxcb-cursor0
-              cd build
-              curl -fsSLO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-              curl -fsLSO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-              chmod +x linuxdeploy-*.AppImage
-
-          - name: set version
-            run: |
-              SHORT_SHA=$(git rev-parse --short HEAD)
-              BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD || echo "$GITHUB_REF_NAME")
-              SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
-              TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
-              echo "VERSION=$TAG" >> $GITHUB_ENV
 
           - name: build appimage
             working-directory: src
