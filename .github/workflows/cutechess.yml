@@ -205,6 +205,7 @@ jobs:
         matrix:
           qt_version: [6.7.2]
           os: [ubuntu-latest]
+          build_type: [Debug, RelWithDebInfo]
       steps:
           - name: Checkout target repository (clone by URL)
             shell: bash
@@ -248,8 +249,8 @@ jobs:
             run: |
                 mkdir build
                 cd build
-                cmake .. -DWITH_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr
-                cmake --build .
+                cmake .. -DWITH_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+                cmake --build . --config ${{ matrix.build_type }}
                 make install DESTDIR=AppDir
 
           - name: download appimage tools
@@ -277,7 +278,7 @@ jobs:
             with:
               upload_url: ${{ needs.release.outputs.upload_url }}
               asset_path: src/build/Cute_Chess-${{ env.VERSION }}-x86_64.AppImage
-              asset_name: Cute_Chess-${{ env.VERSION }}-x86_64.AppImage
+              asset_name: Cute_Chess-${{ env.VERSION }}-x86_64-${{ matrix.build_type }}.AppImage
               asset_content_type: application/octet-stream
 
   winrel:
@@ -291,6 +292,7 @@ jobs:
         matrix:
           qt_version: [6.7.2]
           os: [windows-latest]
+          build_type: [Debug, RelWithDebInfo]
       steps:
           - name: Checkout target repository (clone by URL)
             shell: bash
@@ -325,8 +327,8 @@ jobs:
             run: |
                 mkdir build
                 cd build
-                cmake .. -DWITH_TESTS=OFF
-                cmake --build . --config release
+                cmake .. -DWITH_TESTS=OFF -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+                cmake --build . --config ${{ matrix.build_type }}
 
           - name: set version
             shell: bash
@@ -391,5 +393,5 @@ jobs:
             with:
               upload_url: ${{ needs.release.outputs.upload_url }}
               asset_path: src/dist/cutechess-${{ env.VERSION }}-win64.exe
-              asset_name: cutechess-${{ env.VERSION }}-win64.exe
+              asset_name: cutechess-${{ env.VERSION }}-win64-${{ matrix.build_type }}.exe
               asset_content_type: application/octet-stream
