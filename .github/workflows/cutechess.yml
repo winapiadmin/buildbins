@@ -345,8 +345,8 @@ jobs:
             run: |
               mkdir cutechess-$env:VERSION-win64
               cd cutechess-$env:VERSION-win64
-              cp ..\build\Release\cutechess.exe .
-              cp ..\build\Release\cutechess-cli.exe .
+              cp ..\build\cutechess.exe .
+              cp ..\build\cutechess-cli.exe .
               cp ..\docs\cutechess-cli.6.html .
               cp ..\docs\cutechess-cli.6.txt .
               cp ..\docs\cutechess-engines.json.5.html .
