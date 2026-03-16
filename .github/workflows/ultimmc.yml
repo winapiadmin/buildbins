@@ -90,7 +90,6 @@ jobs:
           cd build
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DLauncher_LAYOUT=linux \
             -DLauncher_BUILD_PLATFORM=linux-x86_64 \
             -DLauncher_EMBED_SECRETS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     
@@ -134,7 +133,6 @@ jobs:
     
           cmake .. -G Ninja ^
             -DCMAKE_BUILD_TYPE=Release ^
-            -DLauncher_LAYOUT=win ^
             -DLauncher_BUILD_PLATFORM=windows-x86_64 ^
             -DLauncher_EMBED_SECRETS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     
@@ -172,7 +170,6 @@ jobs:
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)/lib/cmake" \
-            -DLauncher_LAYOUT=mac-bundle \
             -DLauncher_BUILD_PLATFORM=osx64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
             -DLauncher_EMBED_SECRETS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
