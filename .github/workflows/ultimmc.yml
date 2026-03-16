@@ -92,7 +92,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DLauncher_LAYOUT=linux \
             -DLauncher_BUILD_PLATFORM=linux-x86_64 \
-            -DLauncher_EMBED_SECRETS=OFF
+            -DLauncher_EMBED_SECRETS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     
           cmake --build .
     
@@ -136,7 +136,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release ^
             -DLauncher_LAYOUT=win ^
             -DLauncher_BUILD_PLATFORM=windows-x86_64 ^
-            -DLauncher_EMBED_SECRETS=OFF
+            -DLauncher_EMBED_SECRETS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     
           cmake --build .
     
@@ -175,7 +175,7 @@ jobs:
             -DLauncher_LAYOUT=mac-bundle \
             -DLauncher_BUILD_PLATFORM=osx64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
-            -DLauncher_EMBED_SECRETS=OFF
+            -DLauncher_EMBED_SECRETS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     
           cmake --build .
     
