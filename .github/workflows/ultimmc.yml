@@ -1,0 +1,226 @@
+name: UltimMC build
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "UltimMC repo URL"
+        required: false
+        default: "https://github.com/UltimMC/Launcher"
+      repo_branch:
+        description: "Branch"
+        required: false
+        default: "develop"
+      repo_commit:
+        description: "Commit SHA (optional)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  
+  # ------------------------------------------------------------
+  # BUILD MATRIX
+  # ------------------------------------------------------------
+  
+  build:
+    name: "${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    
+    steps:
+      - name: Checkout target repository
+        shell: bash
+        run: |
+          REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/UltimMC/Launcher' }}"
+          REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
+    
+          echo "Cloning $REPO_URL"
+          git clone "$REPO_URL" src
+          cd src
+    
+          if [ -n "${{ github.event.inputs.repo_commit }}" ]; then
+            git fetch --depth=1 origin "$REPO_REF" || true
+            git checkout "$REPO_REF"
+          else
+            git checkout "$REPO_REF" || (git fetch --tags --all && git checkout "$REPO_REF")
+          fi
+    
+      - name: Compute version
+        shell: bash
+        run: |
+          cd src
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          SAFE_BRANCH=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          VERSION="ultimmc-${SAFE_BRANCH}-${SHORT_SHA}"
+    
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+    
+    # ------------------------------------------------------------
+    # LINUX BUILD
+    # ------------------------------------------------------------
+    
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential \
+            ninja-build \
+            cmake \
+            qtbase5-dev \
+            qttools5-dev \
+            qttools5-dev-tools \
+            libqt5svg5-dev \
+            libssl-dev \
+            zlib1g-dev \
+            libgl1-mesa-dev \
+            libx11-dev
+    
+      - name: Build UltimMC (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: src
+        run: |
+          mkdir build
+          cd build
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLauncher_LAYOUT=linux \
+            -DLauncher_BUILD_PLATFORM=linux-x86_64 \
+            -DLauncher_EMBED_SECRETS=OFF
+    
+          cmake --build .
+    
+      - name: Package Linux build
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir artifact
+          cp src/build/UltimMC artifact/
+    
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: ultimmc-linux
+          path: artifact/
+    
+    # ------------------------------------------------------------
+    # WINDOWS BUILD
+    # ------------------------------------------------------------
+    
+      - name: Install Qt5 (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: 5.15.2
+    
+      - name: Configure MSVC
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+    
+      - name: Build UltimMC (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        working-directory: src
+        run: |
+          mkdir build
+          cd build
+    
+          cmake .. -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DLauncher_LAYOUT=win ^
+            -DLauncher_BUILD_PLATFORM=windows-x86_64 ^
+            -DLauncher_EMBED_SECRETS=OFF
+    
+          cmake --build .
+    
+      - name: Package Windows build
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          mkdir artifact
+          cp src/build/UltimMC.exe artifact/
+    
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'windows-latest'
+        with:
+          name: ultimmc-windows
+          path: artifact/
+    
+    # ------------------------------------------------------------
+    # MACOS BUILD
+    # ------------------------------------------------------------
+    
+      - name: Install Qt5 (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install qt@5 ninja cmake
+    
+      - name: Build UltimMC (macOS)
+        if: matrix.os == 'macos-latest'
+        working-directory: src
+        run: |
+          mkdir build
+          cd build
+    
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)/lib/cmake" \
+            -DLauncher_LAYOUT=mac-bundle \
+            -DLauncher_BUILD_PLATFORM=osx64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 \
+            -DLauncher_EMBED_SECRETS=OFF
+    
+          cmake --build .
+    
+      - name: Package macOS build
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir artifact
+          cp -R src/build/UltimMC.app artifact/
+    
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'macos-latest'
+        with:
+          name: ultimmc-macos
+          path: artifact/
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute commit id
+        id: vars
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "tag=ultimmc-$SHORT_SHA" >> $GITHUB_OUTPUT
+          
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          release_name: ${{ steps.vars.outputs.tag }}
+          draft: false
+
+      - name: Upload assets
+        run: |
+          for f in artifacts/*/*; do
+            gh release upload ultimmc-${{ github.run_number }} "$f"
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
