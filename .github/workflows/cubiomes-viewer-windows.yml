@@ -78,6 +78,7 @@ jobs:
               mingw32-make -j 4
       - name: Debug build output
         working-directory: ${{env.SOURCE_DIR}}
+        shell: cmd
         run: |
           echo === FILE TREE ===
           dir /s *.exe
