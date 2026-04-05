@@ -38,6 +38,7 @@ jobs:
         run: |
           REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cubitect/cubiomes-viewer' }}"
           REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
+          BASE_REPO_URL="${{ github.event.inputs.cubiomes_repo_url || 'https://github.com/cubitect/cubiomes' }}"
           echo "Cloning $REPO_URL"
           git clone "$REPO_URL" src
           cd src
@@ -51,7 +52,7 @@ jobs:
             echo "Checking out ref $REPO_REF"
             git checkout "$REPO_REF" 2>/dev/null || (git fetch --tags --all && git checkout "$REPO_REF")
           fi
-          sed 's/https:\/\/github.com\/Cubitect\/cubiomes.git\//${{ github.event.inputs.cubiomes_repo_url || 'https://github.com/cubitect/cubiomes' }}/g' .gitmodules
+          sed -i "s|https://github.com/Cubitect/cubiomes.git|$BASE_REPO_URL|g" .gitmodules
           git submodule sync --recursive
           git submodule update --init --recursive
         env:
