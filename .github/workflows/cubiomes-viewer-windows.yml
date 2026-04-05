@@ -76,7 +76,11 @@ jobs:
         run:  |
               qmake CONFIG+=release ${{env.SOURCE_DIR}}
               mingw32-make
-              
+      - name: Debug build output
+        working-directory: ${{env.SOURCE_DIR}}
+        run: |
+          echo === FILE TREE ===
+          dir /s *.exe
       - name: Deploy
         working-directory: ${{env.SOURCE_DIR}}
         run:  |
