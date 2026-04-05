@@ -1,4 +1,4 @@
-name: Windows Release
+name: cubiomes-viewer for windows
 
 on:
   workflow_dispatch:
