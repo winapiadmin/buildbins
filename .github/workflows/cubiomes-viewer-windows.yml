@@ -21,7 +21,7 @@ on:
 
 defaults:
   run:
-    shell: pwsh
+    shell: cmd
 
 env:
   PROG:         cubiomes-viewer
@@ -75,10 +75,9 @@ jobs:
         working-directory: ${{env.SOURCE_DIR}}
         run:  |
               qmake CONFIG+=release ${{env.SOURCE_DIR}}
-              mingw32-make -j 4
+              mingw32-make -j 16
       - name: Debug build output
         working-directory: ${{env.SOURCE_DIR}}
-        shell: cmd
         run: |
           echo === FILE TREE ===
           dir /s *.exe
@@ -88,6 +87,7 @@ jobs:
               mkdir ${{env.PROG}}
               copy "${{env.SOURCE_DIR}}\release\${{env.PROG}}.exe" ${{env.PROG}}
               windeployqt --dir ${{env.PROG}} "${{env.SOURCE_DIR}}\release\${{env.PROG}}.exe" --compiler-runtime --no-translations --no-system-d3d-compiler --no-opengl-sw --no-angle
+              dir /s *.exe
               "${{env.SOURCE_DIR}}\${{env.PROG}}\${{env.PROG}}.exe" --version
 
       - name: Save build artifact
