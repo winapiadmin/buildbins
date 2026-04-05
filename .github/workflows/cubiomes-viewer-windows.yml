@@ -1,0 +1,91 @@
+name: Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "cubiomes-viewer repo URL"
+        required: false
+        default: "https://github.com/cubitect/cubiomes-viewer"
+      cubiomes_repo_url:
+        description: "cubiomes repo URL"
+        required: false
+        default: "https://github.com/cubitect/cubiomes"
+      repo_branch:
+        description: "cubiomes-viewer repo branch"
+        required: false
+        default: "trunk"
+      repo_commit:
+        description: "Commit SHA (leave empty for branch HEAD)"
+        required: false
+
+defaults:
+  run:
+    shell: cmd
+
+env:
+  PROG:         cubiomes-viewer
+  SOURCE_DIR:   ${{github.workspace}}/src
+
+
+jobs:
+  build:
+    runs-on: windows-2019
+
+    steps:
+      - name: Checkout target repository (clone by URL)
+        shell: bash
+        run: |
+          REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cubitect/cubiomes-viewer' }}"
+          REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
+          echo "Cloning $REPO_URL"
+          git clone "$REPO_URL" src
+          cd src
+          # Try to check out commit, branch or tag. Be forgiving: fetch refs if needed.
+          set -e
+          if [ -n "${{ github.event.inputs.repo_commit }}" ]; then
+            echo "Checking out commit $REPO_REF"
+            git fetch --depth=1 origin "$REPO_REF" || true
+            git checkout "$REPO_REF"
+          else
+            echo "Checking out ref $REPO_REF"
+            git checkout "$REPO_REF" 2>/dev/null || (git fetch --tags --all && git checkout "$REPO_REF")
+          fi
+          sed 's/https:\/\/github.com\/Cubitect\/cubiomes.git\//${{ github.event.inputs.cubiomes_repo_url || 'https://github.com/cubitect/cubiomes' }}/g' .gitmodules
+          git submodule sync --recursive
+          git submodule update --init --recursive
+        env:
+          # keep runner quiet about any GIT_TRACE etc.
+          GIT_TERMINAL_PROMPT: 0
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          aqtversion:   '==3.1.*'
+          version:      '5.15.2'
+          host:         'windows'
+          target:       'desktop'
+          arch:         'win64_mingw81'
+          archives:     'x86_64 qtbase qttools'
+          cache:        true
+          setup-python: false
+
+      - name: Build
+        working-directory: ${{env.SOURCE_DIR}}
+        run:  |
+              qmake CONFIG+=release ${{env.SOURCE_DIR}}
+              mingw32-make
+              
+      - name: Deploy
+        working-directory: ${{env.SOURCE_DIR}}
+        run:  |
+              mkdir ${{env.PROG}}
+              copy ${{env.SOURCE_DIR}}\release\${{env.PROG}}.exe ${{env.PROG}}
+              windeployqt --dir ${{env.PROG}} ${{env.SOURCE_DIR}}\release\${{env.PROG}}.exe --compiler-runtime --no-translations --no-system-d3d-compiler --no-opengl-sw --no-angle
+              ${{env.SOURCE_DIR}}\${{env.PROG}}\${{env.PROG}}.exe --version
+
+      - name: Save build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{env.PROG}}-win
+          path: ${{env.SOURCE_DIR}}\${{env.PROG}}
