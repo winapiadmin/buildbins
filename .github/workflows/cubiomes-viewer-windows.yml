@@ -75,7 +75,7 @@ jobs:
         working-directory: ${{env.SOURCE_DIR}}
         run:  |
               qmake CONFIG+=release ${{env.SOURCE_DIR}}
-              mingw32-make
+              mingw32-make -j 4
       - name: Debug build output
         working-directory: ${{env.SOURCE_DIR}}
         run: |
