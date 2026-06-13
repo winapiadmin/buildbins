@@ -117,13 +117,6 @@ jobs:
             -DWITH_TESTS=OFF \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr
-
-      - name: Build Linux
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        working-directory: src
-        run: |
-          set -euo pipefail
           cmake --build build -j"$(nproc)"
 
       - name: Install AppDir
@@ -172,14 +165,9 @@ jobs:
         shell: cmd
         working-directory: src
         run: |
+          call "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
           cmake -S . -B build -G Ninja -DWITH_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build Windows
-        if: matrix.os == 'windows-latest'
-        shell: cmd
-        working-directory: src
-        run: |
-          cmake --build build
+          cmake --build build -j12
 
       - name: Package Windows
         if: matrix.os == 'windows-latest'
