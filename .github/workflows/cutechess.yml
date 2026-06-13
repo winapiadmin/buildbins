@@ -1,27 +1,60 @@
 name: cutechess build
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "cutechess repo URL"
+        required: false
+        default: "https://github.com/cutechess/cutechess"
+      repo_commit:
+        description: "Commit SHA (leave empty = workflow SHA)"
+        required: false
 
 permissions:
   contents: write
 
 env:
+  DEFAULT_REPO_URL: https://github.com/cutechess/cutechess
   QT_VERSION: 6.7.2
 
 jobs:
 
+# ------------------------------------------------------------
+# BUILD MATRIX
+# ------------------------------------------------------------
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
 
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Compute version + clone upstream
+        id: meta
+        shell: bash
+        env:
+          REPO_URL: ${{ inputs.repo_url || env.DEFAULT_REPO_URL }}
+          REPO_COMMIT: ${{ inputs.repo_commit }}
+        run: |
+          set -euo pipefail
+
+          git clone --no-tags "$REPO_URL" src
+          cd src
+
+          if [ -n "${REPO_COMMIT}" ]; then
+            git checkout "${REPO_COMMIT}"
+          else
+            git checkout "${GITHUB_SHA}"
+          fi
+
+          SHA=$(git rev-parse --short HEAD)
+          TAG="cutechess-${SHA}"
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
@@ -29,54 +62,39 @@ jobs:
           version: ${{ env.QT_VERSION }}
           modules: qtbase qttools qt5compat
 
-      # ---------------- Linux/macOS ----------------
-      - name: Configure (Unix)
-        if: matrix.os != 'windows-latest'
+      - name: Force Qt path
+        shell: bash
+        run: echo "CMAKE_PREFIX_PATH=$Qt6_DIR" >> $GITHUB_ENV
+
+# ---------------- Linux build ----------------
+      - name: Configure Linux
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: src
         shell: bash
         run: |
           cmake -S . -B build \
+            -G "Unix Makefiles" \
             -DWITH_TESTS=OFF \
-            -DCMAKE_BUILD_TYPE=Release \
-            -G "Unix Makefiles"
+            -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build (Unix)
-        if: matrix.os != 'windows-latest'
+      - name: Build Linux
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: src
         run: cmake --build build -j"$(nproc)"
 
-      # ---------------- Windows ----------------
-      - name: Configure (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: cmd
-        run: |
-          cmake -S . -B build ^
-            -DWITH_TESTS=OFF ^
-            -DCMAKE_BUILD_TYPE=Release ^
-            -G "Ninja"
-
-      - name: Build (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: cmd
-        run: cmake --build build --config Release
-
-      # ---------------- Install (Linux AppDir) ----------------
-      - name: Install AppDir (Linux only)
+      - name: Install AppDir
         if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          cmake --install build --prefix /usr --component Runtime DESTDIR=AppDir
+        working-directory: src
+        run: DESTDIR=AppDir cmake --install build
 
-      - name: Install AppImage tools
+      - name: Build AppImage
         if: matrix.os == 'ubuntu-latest'
+        working-directory: src
         run: |
           sudo apt-get update
           sudo apt-get install -y libfuse2 libxcb-cursor0
 
-      - name: Build AppImage
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
           cd build
-
           curl -fsSLO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           curl -fsSLO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x *.AppImage
@@ -89,46 +107,61 @@ jobs:
             --executable ../AppDir/usr/bin/cutechess \
             --executable ../AppDir/usr/bin/cutechess-cli
 
-          APPIMAGE=$(find . -name "*.AppImage" | head -n 1)
-          mv "$APPIMAGE" "CuteChess-${GITHUB_REF_NAME}-x86_64.AppImage"
+          APPIMAGE=$(find . -name "*.AppImage" | head -n1)
+          mv "$APPIMAGE" "CuteChess-${TAG}-linux.AppImage"
 
-      - name: Upload Linux artifact
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-appimage
-          path: build/*.AppImage
+# ---------------- Windows build ----------------
+      - name: Configure Windows
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        working-directory: src
+        run: |
+          cmake -S . -B build -G Ninja -DWITH_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
 
-      # ---------------- Windows packaging ----------------
+      - name: Build Windows
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        working-directory: src
+        run: cmake --build build
+
       - name: Package Windows
         if: matrix.os == 'windows-latest'
         shell: pwsh
+        working-directory: src
         run: |
-          $version = "${env:GITHUB_REF_NAME}"
-          $dir = "CuteChess-$version-win64"
+          $tag = "${{ steps.meta.outputs.tag }}"
+          $qt = $env:Qt6_DIR
 
+          $dir = "CuteChess-$tag-win64"
           mkdir $dir
 
           Copy-Item build\cutechess.exe $dir
           Copy-Item build\cutechess-cli.exe $dir
 
-          Copy-Item "$env:Qt6_DIR\bin\*.dll" $dir -ErrorAction SilentlyContinue
+          Copy-Item "$qt\bin\Qt6*.dll" $dir -ErrorAction SilentlyContinue
 
           Compress-Archive $dir "$dir.zip"
 
-      - name: Upload Windows artifact
-        if: matrix.os == 'windows-latest'
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows
-          path: "*.zip"
+          name: ${{ matrix.os }}
+          path: |
+            src/build/*.AppImage
+            src/*.zip
+          if-no-files-found: ignore
 
+
+# ------------------------------------------------------------
+# RELEASE (AUTO)
+# ------------------------------------------------------------
   release:
     needs: build
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
         with:
           path: dist
 
@@ -136,4 +169,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/** --draft --title "CuteChess $GITHUB_REF_NAME"
+          TAG="cutechess-${GITHUB_SHA::7}"
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes "Automated build" \
+            --draft=false \
+            dist/**/*
