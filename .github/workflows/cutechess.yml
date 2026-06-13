@@ -18,14 +18,58 @@ on:
 permissions:
   contents: write
 
-jobs:
-# ------------------------------------------------------------
-# 1. MATRIX BUILD (CI)
-# ------------------------------------------------------------
-  build:
-    name: "${{ matrix.os }} Qt ${{ matrix.qt_version }}"
-    runs-on: ${{ matrix.os }}
+env:
+  DEFAULT_REPO_URL: https://github.com/cutechess/cutechess
+  DEFAULT_REPO_BRANCH: master
+  QT6_VERSION: 6.7.2
 
+jobs:
+  prepare:
+    name: Prepare version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      sha: ${{ steps.meta.outputs.sha }}
+      branch: ${{ steps.meta.outputs.branch }}
+    steps:
+      - name: Clone target repository and compute tag
+        id: meta
+        shell: bash
+        env:
+          REPO_URL: ${{ inputs.repo_url || env.DEFAULT_REPO_URL }}
+          REPO_BRANCH: ${{ inputs.repo_branch || env.DEFAULT_REPO_BRANCH }}
+          REPO_COMMIT: ${{ inputs.repo_commit }}
+        run: |
+          set -euo pipefail
+
+          rm -rf src
+          git clone --no-tags "$REPO_URL" src
+          cd src
+
+          if [ -n "${REPO_COMMIT}" ]; then
+            git fetch --depth=1 origin "${REPO_COMMIT}" || true
+            git checkout "${REPO_COMMIT}"
+          else
+            git fetch --depth=1 origin "${REPO_BRANCH}" || true
+            git checkout "${REPO_BRANCH}" 2>/dev/null || git checkout -b "${REPO_BRANCH}" "origin/${REPO_BRANCH}"
+          fi
+
+          SHA="$(git rev-parse --short HEAD)"
+          BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+          if [ "$BRANCH" = "HEAD" ]; then
+            BRANCH="${REPO_BRANCH}"
+          fi
+          BRANCH="$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')"
+          TAG="cutechess-${BRANCH}-${SHA}"
+
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  ci_build:
+    name: "${{ matrix.os }} Qt ${{ matrix.qt_version }}"
+    needs: prepare
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         qt_version: [5.15.2, 6.7.2]
@@ -35,43 +79,23 @@ jobs:
             qt_version: 5.15.2
 
     steps:
-      - name: Checkout target repository (clone by URL)
+      - name: Clone target repository
         shell: bash
-        run: |
-          REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cutechess/cutechess' }}"
-          REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
-          echo "Cloning $REPO_URL"
-          git clone "$REPO_URL" src
-          cd src
-          # Try to check out commit, branch or tag. Be forgiving: fetch refs if needed.
-          set -e
-          if [ -n "${{ github.event.inputs.repo_commit }}" ]; then
-            echo "Checking out commit $REPO_REF"
-            git fetch --depth=1 origin "$REPO_REF" || true
-            git checkout "$REPO_REF"
-          else
-            echo "Checking out ref $REPO_REF"
-            git checkout "$REPO_REF" 2>/dev/null || (git fetch --tags --all && git checkout "$REPO_REF")
-          fi
         env:
-          # keep runner quiet about any GIT_TRACE etc.
-          GIT_TERMINAL_PROMPT: 0
-
-      - name: Get branch + commit (from checked-out repo)
-        shell: bash
+          REPO_URL: ${{ inputs.repo_url || env.DEFAULT_REPO_URL }}
+          REPO_BRANCH: ${{ inputs.repo_branch || env.DEFAULT_REPO_BRANCH }}
+          REPO_COMMIT: ${{ inputs.repo_commit }}
         run: |
+          set -euo pipefail
+          git clone --no-tags "$REPO_URL" src
           cd src
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD || echo "$GITHUB_REF_NAME")
-          SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
-          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
-          echo "BRANCH=$SANITIZED_BRANCH" >> $GITHUB_ENV
-          case "${{ matrix.os }}" in
-            "ubuntu-latest") echo "ARCH=linux-x86_64" >> $GITHUB_ENV ;;
-            "macos-latest")  echo "ARCH=macos-x86_64" >> $GITHUB_ENV ;;
-            "windows-latest") echo "ARCH=windows-x86_64" >> $GITHUB_ENV ;;
-            *) echo "ARCH=unknown" >> $GITHUB_ENV ;;
-          esac
+          if [ -n "${REPO_COMMIT}" ]; then
+            git fetch --depth=1 origin "${REPO_COMMIT}" || true
+            git checkout "${REPO_COMMIT}"
+          else
+            git fetch --depth=1 origin "${REPO_BRANCH}" || true
+            git checkout "${REPO_BRANCH}" 2>/dev/null || git checkout -b "${REPO_BRANCH}" "origin/${REPO_BRANCH}"
+          fi
 
       - name: Install Qt 5
         if: startsWith(matrix.qt_version, '5.')
@@ -91,10 +115,9 @@ jobs:
         shell: bash
         working-directory: src
         run: |
-          mkdir -p build
-          cd build
-          cmake .. -G Ninja
-          cmake --build . -j$(nproc)
+          set -euo pipefail
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
 
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
@@ -102,10 +125,8 @@ jobs:
         working-directory: src
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          mkdir build
-          cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --config Release
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
 
       - name: Test (non-Windows)
         if: matrix.os != 'windows-latest'
@@ -126,272 +147,248 @@ jobs:
             cd build
             ctest -C Release --output-on-failure || exit 0
           )
-# ------------------------------------------------------------
-# 1.5 CREATE TAG (after successful build)
-# ------------------------------------------------------------
+
+  release_build:
+    name: "${{ matrix.os }} Qt ${{ matrix.qt_version }} ${{ matrix.build_type }}"
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        qt_version: [6.7.2]
+        os: [ubuntu-latest, windows-latest]
+        build_type: [Debug, RelWithDebInfo]
+
+    steps:
+      - name: Clone target repository
+        shell: bash
+        env:
+          REPO_URL: ${{ inputs.repo_url || env.DEFAULT_REPO_URL }}
+          REPO_BRANCH: ${{ inputs.repo_branch || env.DEFAULT_REPO_BRANCH }}
+          REPO_COMMIT: ${{ inputs.repo_commit }}
+        run: |
+          set -euo pipefail
+          git clone --no-tags "$REPO_URL" src
+          cd src
+          if [ -n "${REPO_COMMIT}" ]; then
+            git fetch --depth=1 origin "${REPO_COMMIT}" || true
+            git checkout "${REPO_COMMIT}"
+          else
+            git fetch --depth=1 origin "${REPO_BRANCH}" || true
+            git checkout "${REPO_BRANCH}" 2>/dev/null || git checkout -b "${REPO_BRANCH}" "origin/${REPO_BRANCH}"
+          fi
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: ${{ matrix.qt_version }}
+          modules: qt5compat
+
+      - name: Set version
+        shell: bash
+        working-directory: src
+        run: |
+          set -euo pipefail
+          echo "VERSION=${{ needs.prepare.outputs.tag }}" >> "$GITHUB_ENV"
+
+      - name: Build and stage (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        working-directory: src
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -G Ninja -DWITH_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          cmake --build build -j"$(nproc)"
+          DESTDIR=AppDir cmake --install build
+
+      - name: Download AppImage tools
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        working-directory: src/build
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 libxcb-cursor0
+          curl -fsSLO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -fsSLO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy-*.AppImage
+
+      - name: Build AppImage
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        working-directory: src/build
+        run: |
+          set -euo pipefail
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --plugin qt \
+            --output appimage \
+            --custom-apprun=../dist/appimage/CuteChess-AppRun \
+            --icon-file=../projects/gui/res/icons/cutechess_256x256.png \
+            --executable AppDir/usr/bin/cutechess \
+            --executable AppDir/usr/bin/cutechess-cli
+
+          APPIMAGE="$(find . -maxdepth 1 -name '*.AppImage' | head -n1)"
+          OUT="Cute_Chess-${VERSION}-x86_64-${{ matrix.build_type }}.AppImage"
+          mv "$APPIMAGE" "$OUT"
+
+      - name: Upload Linux artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.build_type }}
+          path: src/build/Cute_Chess-${{ needs.prepare.outputs.tag }}-x86_64-${{ matrix.build_type }}.AppImage
+          if-no-files-found: error
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        working-directory: src
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -S . -B build -G Ninja -DWITH_TESTS=OFF -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
+          cmake --build build --config %BUILD_TYPE%
+
+        env:
+          BUILD_TYPE: ${{ matrix.build_type }}
+
+      - name: Stage Windows package
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        working-directory: src
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $version = "${{ needs.prepare.outputs.tag }}"
+          $buildType = "${{ matrix.build_type }}"
+          $pkgDir = "cutechess-$version-win64-$buildType"
+
+          New-Item -ItemType Directory -Force $pkgDir | Out-Null
+
+          Copy-Item .\build\cutechess.exe $pkgDir
+          Copy-Item .\build\cutechess-cli.exe $pkgDir
+          Copy-Item .\docs\cutechess-cli.6.html $pkgDir
+          Copy-Item .\docs\cutechess-cli.6.txt $pkgDir
+          Copy-Item .\docs\cutechess-engines.json.5.html $pkgDir
+          Copy-Item .\docs\cutechess-engines.json.5.txt $pkgDir
+          Copy-Item .\COPYING $pkgDir
+          Copy-Item "$env:VCDIR\VC\Redist\MSVC\v143\vc_redist.x64.exe" $pkgDir
+          Copy-Item "$env:Qt6_Dir\bin\Qt6Core.dll" $pkgDir
+          Copy-Item "$env:Qt6_Dir\bin\Qt6Gui.dll" $pkgDir
+          Copy-Item "$env:Qt6_Dir\bin\Qt6Svg.dll" $pkgDir
+          Copy-Item "$env:Qt6_Dir\bin\Qt6PrintSupport.dll" $pkgDir
+          Copy-Item "$env:Qt6_Dir\bin\Qt6Widgets.dll" $pkgDir
+          Copy-Item "$env:Qt6_Dir\bin\Qt6Concurrent.dll" $pkgDir
+          Copy-Item "$env:Qt6_Dir\bin\Qt6Core5Compat.dll" $pkgDir
+
+          New-Item -ItemType Directory -Force "$pkgDir\platforms" | Out-Null
+          Copy-Item "$env:Qt6_Dir\plugins\platforms\qwindows.dll" "$pkgDir\platforms"
+
+          New-Item -ItemType Directory -Force "$pkgDir\styles" | Out-Null
+          Copy-Item "$env:Qt6_Dir\plugins\styles\qmodernwindowsstyle.dll" "$pkgDir\styles"
+
+          New-Item -ItemType Directory -Force "$pkgDir\plugins\iconengines" -PathErrorAction SilentlyContinue | Out-Null
+          New-Item -ItemType Directory -Force "$pkgDir\plugins\imageformats" | Out-Null
+          Copy-Item "$env:Qt6_Dir\plugins\iconengines\qsvgicon.dll" "$pkgDir\plugins\iconengines"
+          Copy-Item "$env:Qt6_Dir\plugins\imageformats\qsvg.dll" "$pkgDir\plugins\imageformats"
+
+          Compress-Archive -Path "$pkgDir\*" -DestinationPath "$pkgDir.zip" -Force
+
+      - name: Create Windows installer
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        working-directory: src
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${{ needs.prepare.outputs.tag }}"
+          $buildType = "${{ matrix.build_type }}"
+
+          & "$env:ISDIR\iscc.exe" `
+            /O"$PWD\dist" `
+            /DMyAppVersion=$version `
+            /DQtLibPath=$env:Qt6_Dir `
+            /DMSVCPath=$env:VCDIR `
+            /DCuteChessPath=$env:GITHUB_WORKSPACE\src `
+            dist\windows_setup.iss
+
+          $installer = Get-ChildItem .\dist\*.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) {
+            throw "Installer was not produced"
+          }
+
+          Copy-Item $installer.FullName ".\cutechess-$version-win64-$buildType.exe"
+
+      - name: Upload Windows artifacts
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.build_type }}
+          path: |
+            src/cutechess-${{ needs.prepare.outputs.tag }}-win64-${{ matrix.build_type }}.zip
+            src/cutechess-${{ needs.prepare.outputs.tag }}-win64-${{ matrix.build_type }}.exe
+          if-no-files-found: error
+
   create_tag:
+    name: Create tag
+    needs: [ci_build, release_build]
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.make_tag.outputs.tag }}
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout current repository
+        uses: actions/checkout@v4
 
-      - name: Clone upstream repo (compute branch + sha)
-        shell: bash
-        id: compute
-        run: |
-          set -e
-          REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cutechess/cutechess' }}"
-          REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
-          echo "Cloning $REPO_URL @ $REPO_REF"
-          rm -rf tmpsrc
-          git clone --depth=1 "$REPO_URL" tmpsrc
-          cd tmpsrc || exit 1
-          # be forgiving: try to check out requested ref if it's a commit / tag / branch
-          git checkout "$REPO_REF" 2>/dev/null || (git fetch --tags --all && git checkout "$REPO_REF")
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD || echo "$GITHUB_REF_NAME")
-          SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
-          TAG="cutechess-${SANITIZED_BRANCH}-${SHORT_SHA}"
-          echo "Computed tag: $TAG"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "VERSION=$TAG" >> $GITHUB_ENV
-      - name: Create & push tag in this repo (repo A)
+      - name: Create and push tag in this repo
         id: make_tag
         shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          set -e
+          set -euo pipefail
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-          TAG="${{ steps.compute.outputs.tag }}"
-          # Avoid recreating the same tag
+
           if git rev-parse --verify "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists — skipping push"
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
           git tag "$TAG"
           git push origin "$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-# ------------------------------------------------------------
-# 2. CREATE RELEASE (tags only)
-# ------------------------------------------------------------
-  release:
+  create_release:
+    name: Create draft release
     needs: create_tag
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.rel.outputs.upload_url }}
-      tag: ${{ needs.create_tag.outputs.tag }}
-
     steps:
-      - uses: actions/checkout@v4
-
-      - id: rel
-        uses: actions/create-release@v1
+      - name: Create draft release with gh
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.create_tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --draft \
+            --title "cutechess in $TAG" \
+            --notes ""
+
+  publish_release:
+    name: Upload release assets
+    needs: [create_release, create_tag]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
         with:
-          tag_name: ${{ needs.create_tag.outputs.tag }}
-          release_name: "cutechess in ${{ needs.create_tag.outputs.tag }}"
-          draft: true
+          path: artifacts
 
-  linuxrel:
-      needs: release
-      name: "${{ matrix.os }} Qt ${{ matrix.qt_version }}"
-      runs-on: ${{ matrix.os }}
-      strategy:
-        matrix:
-          qt_version: [6.7.2]
-          os: [ubuntu-latest]
-          build_type: [Debug, RelWithDebInfo]
-      steps:
-          - name: Checkout target repository (clone by URL)
-            shell: bash
-            run: |
-              REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cutechess/cutechess' }}"
-              REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
-              echo "Cloning $REPO_URL"
-              git clone "$REPO_URL" src
-              cd src
-              # Try to check out commit, branch or tag. Be forgiving: fetch refs if needed.
-              set -e
-              if [ -n "${{ github.event.inputs.repo_commit }}" ]; then
-                echo "Checking out commit $REPO_REF"
-                git fetch --depth=1 origin "$REPO_REF" || true
-                git checkout "$REPO_REF"
-              else
-                echo "Checking out ref $REPO_REF"
-                git checkout "$REPO_REF" 2>/dev/null || (git fetch --tags --all && git checkout "$REPO_REF")
-              fi
-            env:
-              # keep runner quiet about any GIT_TRACE etc.
-              GIT_TERMINAL_PROMPT: 0
-
-          - name: install qt 6.x
-            uses: jurplel/install-qt-action@v3
-            with:
-              version: ${{ matrix.qt_version }}
-              modules: 'qt5compat'
-
-          - name: set version
-            working-directory: src 
-            run: |
-              SHORT_SHA=$(git rev-parse --short HEAD)
-              BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD || echo "$GITHUB_REF_NAME")
-              SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
-              TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
-              echo "VERSION=$TAG" >> $GITHUB_ENV
-
-          - name: build cute chess
-            working-directory: src 
-            run: |
-                mkdir build
-                cd build
-                cmake .. -DWITH_TESTS=OFF -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-                cmake --build . --config ${{ matrix.build_type }}
-                make install DESTDIR=AppDir
-
-          - name: download appimage tools
-            working-directory: src
-            run: |
-              sudo apt install libfuse2 libxcb-cursor0
-              mkdir build || true
-              cd build
-              curl -fsSLO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-              curl -fsLSO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-              chmod +x linuxdeploy-*.AppImage
-              
-          - name: build appimage
-            working-directory: src
-            run: |
-              cd build
-              ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage --custom-apprun=../dist/appimage/CuteChess-AppRun --icon-file=../projects/gui/res/icons/cutechess_256x256.png \
-              --executable AppDir/usr/bin/cutechess \
-              --executable AppDir/usr/bin/cutechess-cli
-
-          - name: upload release asset
-            uses: actions/upload-release-asset@v1
-            env:
-              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            with:
-              upload_url: ${{ needs.release.outputs.upload_url }}
-              asset_path: src/build/Cute_Chess-${{ env.VERSION }}-x86_64.AppImage
-              asset_name: Cute_Chess-${{ env.VERSION }}-x86_64-${{ matrix.build_type }}.AppImage
-              asset_content_type: application/octet-stream
-
-  winrel:
-      needs: release
-      name: "${{ matrix.os }} Qt ${{ matrix.qt_version }}"
-      runs-on: ${{ matrix.os }}
-      env:
-        VCDIR: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise'
-        ISDIR: 'C:\Program Files (x86)\Inno Setup 6'
-      strategy:
-        matrix:
-          qt_version: [6.7.2]
-          os: [windows-latest]
-          build_type: [Debug, RelWithDebInfo]
-      steps:
-          - name: Checkout target repository (clone by URL)
-            shell: bash
-            run: |
-              REPO_URL="${{ github.event.inputs.repo_url || 'https://github.com/cutechess/cutechess' }}"
-              REPO_REF="${{ github.event.inputs.repo_commit || github.event.inputs.repo_branch || github.ref_name }}"
-              echo "Cloning $REPO_URL"
-              git clone "$REPO_URL" src
-              cd src
-              # Try to check out commit, branch or tag. Be forgiving: fetch refs if needed.
-              set -e
-              if [ -n "${{ github.event.inputs.repo_commit }}" ]; then
-                echo "Checking out commit $REPO_REF"
-                git fetch --depth=1 origin "$REPO_REF" || true
-                git checkout "$REPO_REF"
-              else
-                echo "Checking out ref $REPO_REF"
-                git checkout "$REPO_REF" 2>/dev/null || (git fetch --tags --all && git checkout "$REPO_REF")
-              fi
-            env:
-              # keep runner quiet about any GIT_TRACE etc.
-              GIT_TERMINAL_PROMPT: 0
-
-          - name: install qt 6.x
-            uses: jurplel/install-qt-action@v3
-            with:
-              version: ${{ matrix.qt_version }}
-              modules: 'qt5compat'
-
-          - name: build cute chess
-            working-directory: src
-            run: |
-                mkdir build
-                cd build
-                cmake .. -DWITH_TESTS=OFF -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-                cmake --build . --config ${{ matrix.build_type }}
-
-          - name: set version
-            shell: bash
-            working-directory: src
-            run: |
-              SHORT_SHA=$(git rev-parse --short HEAD)
-              BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD || echo "$GITHUB_REF_NAME")
-              SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
-              TAG="${SANITIZED_BRANCH}-${SHORT_SHA}"
-              echo "VERSION=$TAG" >> $GITHUB_ENV
-
-          - name: create a release zip file
-            working-directory: src
-            run: |
-              mkdir cutechess-$env:VERSION-win64
-              cd cutechess-$env:VERSION-win64
-              cp ..\build\cutechess.exe .
-              cp ..\build\cutechess-cli.exe .
-              cp ..\docs\cutechess-cli.6.html .
-              cp ..\docs\cutechess-cli.6.txt .
-              cp ..\docs\cutechess-engines.json.5.html .
-              cp ..\docs\cutechess-engines.json.5.txt .
-              cp ..\COPYING .
-              cp "$env:VCDIR\VC\Redist\MSVC\v143\vc_redist.x64.exe" .
-              cp "$env:Qt6_Dir\bin\Qt6Core.dll" .
-              cp "$env:Qt6_Dir\bin\Qt6Gui.dll" .
-              cp "$env:Qt6_Dir\bin\Qt6Svg.dll" .
-              cp "$env:Qt6_Dir\bin\Qt6PrintSupport.dll" .
-              cp "$env:Qt6_Dir\bin\Qt6Widgets.dll" .
-              cp "$env:Qt6_Dir\bin\Qt6ConCurrent.dll" .
-              cp "$env:Qt6_Dir\bin\Qt6Core5Compat.dll" .
-              mkdir platforms
-              cp "$env:Qt6_Dir\plugins\platforms\qwindows.dll" platforms\
-              mkdir styles
-              cp "$env:Qt6_Dir\plugins\styles\qmodernwindowsstyle.dll" styles\
-              mkdir plugins
-              mkdir plugins\iconengines
-              cp "$env:Qt6_Dir\plugins\iconengines\qsvgicon.dll" plugins\iconengines
-              mkdir plugins\imageformats
-              cp "$env:Qt6_Dir\plugins\imageformats\qsvg.dll" plugins\imageformats
-              cd ..
-              7z a cutechess-$env:VERSION-win64.zip cutechess-$env:VERSION-win64\
-
-          - name: create an installer
-            working-directory: src
-            run: |
-              & "$env:ISDIR\iscc.exe" /DMyAppVersion=$env:VERSION /DQtLibPath=$env:Qt6_Dir /DMSVCPath=$env:VCDIR /DCuteChessPath=$env:GITHUB_WORKSPACE\src dist\windows_setup.iss
-
-          - name: upload zip release asset
-            uses: actions/upload-release-asset@v1
-            env:
-              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            with:
-              upload_url: ${{ needs.githubrel.outputs.upload_url }}
-              asset_path: src/cutechess-${{ env.VERSION }}-win64.zip
-              asset_name: cutechess-${{ env.VERSION }}-win64.zip
-              asset_content_type: application/zip
-          - name: upload installer release asset
-            uses: actions/upload-release-asset@v1
-            env:
-              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            with:
-              upload_url: ${{ needs.release.outputs.upload_url }}
-              asset_path: src/dist/cutechess-${{ env.VERSION }}-win64.exe
-              asset_name: cutechess-${{ env.VERSION }}-win64-${{ matrix.build_type }}.exe
-              asset_content_type: application/octet-stream
+      - name: Upload artifacts to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.create_tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          find artifacts -type f -print
+          gh release upload "$TAG" artifacts/**/*
