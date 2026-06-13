@@ -16,7 +16,6 @@ permissions:
 
 env:
   DEFAULT_REPO_URL: https://github.com/cutechess/cutechess
-  QT_VERSION: 6.7.2
 
 jobs:
   prepare:
@@ -66,7 +65,7 @@ jobs:
           if-no-files-found: error
 
   build:
-    name: "${{ matrix.os }} Qt ${{ env.QT_VERSION }}"
+    name: "${{ matrix.os }} Qt 6.8.3"
     needs: prepare
     runs-on: ${{ matrix.os }}
     strategy:
@@ -94,7 +93,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
         with:
-          version: ${{ env.QT_VERSION }}
+          version: 6.8.3
           modules: qtbase qttools qt5compat
 
       - name: Force Qt path
