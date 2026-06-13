@@ -72,11 +72,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        qt_version: [5.15.2, 6.7.2]
+        qt_version: [6.7.2]
         os: [windows-latest, ubuntu-latest, macos-latest]
-        exclude:
-          - os: macos-latest
-            qt_version: 5.15.2
 
     steps:
       - name: Clone target repository
@@ -97,19 +94,15 @@ jobs:
             git checkout "${REPO_BRANCH}" 2>/dev/null || git checkout -b "${REPO_BRANCH}" "origin/${REPO_BRANCH}"
           fi
 
-      - name: Install Qt 5
-        if: startsWith(matrix.qt_version, '5.')
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: ${{ matrix.qt_version }}
-
       - name: Install Qt 6
         if: startsWith(matrix.qt_version, '6.')
         uses: jurplel/install-qt-action@v3
         with:
           version: ${{ matrix.qt_version }}
-          modules: qt5compat
-
+      - name: Force Qt path
+        shell: bash
+        run: |
+          echo "CMAKE_PREFIX_PATH=$Qt6_DIR" >> $GITHUB_ENV
       - name: Build (non-Windows)
         if: matrix.os != 'windows-latest'
         shell: bash
