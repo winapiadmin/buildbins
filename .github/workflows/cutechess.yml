@@ -159,13 +159,15 @@ jobs:
           name: linux
           path: src/build/CuteChess-${{ env.TAG }}-linux.AppImage
           if-no-files-found: error
-
+      - name: Set up MSVC Developer Command Prompt
+        if: matrix.os == 'windows-latest'
+        uses: TheMrMilchmann/setup-msvc-dev@v4.0.0
+        
       - name: Configure Windows
         if: matrix.os == 'windows-latest'
         shell: cmd
         working-directory: src
         run: |
-          call "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
           cmake -S . -B build -G Ninja -DWITH_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j12
 
