@@ -162,7 +162,8 @@ jobs:
       - name: Set up MSVC Developer Command Prompt
         if: matrix.os == 'windows-latest'
         uses: TheMrMilchmann/setup-msvc-dev@v4.0.0
-        
+        with:
+          arch: x64
       - name: Configure Windows
         if: matrix.os == 'windows-latest'
         shell: cmd
