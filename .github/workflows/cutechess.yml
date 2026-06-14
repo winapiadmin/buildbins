@@ -198,27 +198,9 @@ jobs:
           Copy-Item .\docs\cutechess-engines.json.5.html $dir
           Copy-Item .\docs\cutechess-engines.json.5.txt $dir
           Copy-Item .\COPYING $dir
-          Copy-Item "$env:VCDIR\VC\Redist\MSVC\v143\vc_redist.x64.exe" $dir
-
-          Copy-Item "$qt\bin\Qt6Core.dll" $dir
-          Copy-Item "$qt\bin\Qt6Gui.dll" $dir
-          Copy-Item "$qt\bin\Qt6Svg.dll" $dir
-          Copy-Item "$qt\bin\Qt6PrintSupport.dll" $dir
-          Copy-Item "$qt\bin\Qt6Widgets.dll" $dir
-          Copy-Item "$qt\bin\Qt6Concurrent.dll" $dir
-          Copy-Item "$qt\bin\Qt6Core5Compat.dll" $dir
-
-          New-Item -ItemType Directory -Force "$dir\platforms" | Out-Null
-          Copy-Item "$qt\plugins\platforms\qwindows.dll" "$dir\platforms"
-
-          New-Item -ItemType Directory -Force "$dir\styles" | Out-Null
-          Copy-Item "$qt\plugins\styles\qmodernwindowsstyle.dll" "$dir\styles"
-
-          New-Item -ItemType Directory -Force "$dir\plugins\iconengines" | Out-Null
-          New-Item -ItemType Directory -Force "$dir\plugins\imageformats" | Out-Null
-          Copy-Item "$qt\plugins\iconengines\qsvgicon.dll" "$dir\plugins\iconengines"
-          Copy-Item "$qt\plugins\imageformats\qsvg.dll" "$dir\plugins\imageformats"
-
+          # pack Qt w/ CRT and C++ RT
+          & "$qt\bin\windeployqt.exe" --compiler-runtime --no-translations --dir $dir ".\build\cutechess.exe"
+  
           Compress-Archive -Path "$dir\*" -DestinationPath "$dir.zip" -Force
 
       - name: Upload Windows artifact
