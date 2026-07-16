@@ -1,3 +1,5 @@
+name: fishtest
+
 on:
   workflow_dispatch: 
 
@@ -33,7 +35,8 @@ jobs:
           cfg = configparser.ConfigParser()
           cfg.read("fishtest.cfg")
           cfg["private"]["hw_seed"] = str(secrets.randbits(64))
-      
+          import uuid
+          cfg["parameters"]["uuid_prefix"] = str(uuid.uuid4())[:8]
           with open("fishtest.cfg", "w") as f:
               cfg.write(f)
           PY
