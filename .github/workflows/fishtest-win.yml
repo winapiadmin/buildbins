@@ -22,6 +22,7 @@ jobs:
         with:
           python-version: 3.13
       - name: fishtest
+        shell: bash
         run: |
           cd worker/
           cat > fishtest.cfg <<'EOF'
