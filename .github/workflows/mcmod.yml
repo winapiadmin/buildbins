@@ -24,7 +24,7 @@ jobs:
       matrix:
         java: [ 25, 21 ]
         distro: [ temurin ]
-        os: [ ubuntu-latest ]
+        os: [ windows-latest ]
     runs-on: ${{ matrix.os }}
     steps:
       # 1. We must check out the current repo bare minimum to run local scripts, 
