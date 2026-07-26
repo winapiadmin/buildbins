@@ -45,11 +45,9 @@ jobs:
 
       - name: make gradle wrapper executable
         if: ${{ runner.os != 'Windows' }}
-        working-directory: target_repo
         run: chmod +x ./gradlew
 
       - name: build
-        working-directory: target_repo
         run: ./gradlew build
 
       - name: Capture build artifacts
@@ -58,5 +56,5 @@ jobs:
         with:
           name: build-artifacts-${{ matrix.java }}-${{ matrix.distro }}
           path: |
-            target_repo/build/libs/
-            target_repo/build/devlibs/
+            build/libs/
+            build/devlibs/
