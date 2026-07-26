@@ -31,45 +31,31 @@ jobs:
       # OR we can just fetch the target repository directly if that is the goal.
       # Assuming you want to clone the target repository provided in 'repo_url':
       
-      - name: Resolve target branch and clone repository
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Clone repository
         run: |
           TARGET_URL="${{ inputs.repo_url }}"
           TARGET_BRANCH="${{ inputs.repo_branch }}"
           TARGET_COMMIT="${{ inputs.repo_commit }}"
-          
-          # If branch is empty, use gh CLI to query the remote default branch dynamically
+      
           if [ -z "$TARGET_BRANCH" ]; then
-            echo "No branch specified. Querying remote default branch..."
-            # Extracted owner/repo from URL to use GitHub CLI
-            REPO_PATH=$(echo "$TARGET_URL" | sed -E 's|https://github.com||' | sed 's/\.git$//')
+            REPO_PATH=$(echo "$TARGET_URL" | sed -E 's|https://github.com/||' | sed 's/\.git$//')
             TARGET_BRANCH=$(gh repo view "$REPO_PATH" --json defaultBranchRef --jq '.defaultBranchRef.name')
-            echo "Detected default branch: $TARGET_BRANCH"
           fi
-          
-          # Determine what specific reference to check out
-          CHECKOUT_REF="$TARGET_BRANCH"
-          if [ -not -z "$TARGET_COMMIT" ]; then
-            CHECKOUT_REF="$TARGET_COMMIT"
-          fi
-          
-          # Clone the external target repo directly via git clone
-          git clone --branch "$TARGET_BRANCH" "$TARGET_URL" target_repo
-          cd target_repo
-          if [ -not -z "$TARGET_COMMIT" ]; then
+      
+          git clone --depth 1 --branch "$TARGET_BRANCH" "$TARGET_URL" target_repo
+      
+          if [ -n "$TARGET_COMMIT" ]; then
+            cd target_repo
+            git fetch --depth 1 origin "$TARGET_COMMIT"
             git checkout "$TARGET_COMMIT"
           fi
-          
-          # Move files to workspace root so subsequent Gradle steps find them
-          mv * .* .. 2>/dev/null || true
-          cd ..
-          rm -rf target_repo
 
       - name: validate gradle wrapper
+        working-directory: target_repo
         uses: gradle/actions/wrapper-validation@v5
 
       - name: setup jdk ${{ matrix.java }}
+        working-directory: target_repo
         uses: actions/setup-java@v5
         with:
           distribution: ${{ matrix.distro }}
@@ -77,22 +63,25 @@ jobs:
 
       - name: setup gradle
         uses: gradle/actions/setup-gradle@v5
+        working-directory: target_repo
         with:
           # Tuned to look at matrix context since this is an external repo workflow
           cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
 
       - name: make gradle wrapper executable
         if: ${{ runner.os != 'Windows' }}
+        working-directory: target_repo
         run: chmod +x ./gradlew
 
       - name: build
+        working-directory: target_repo
         run: ./gradlew build
 
-      - name: capture build artifacts
-        if: ${{ runner.os == 'Linux' }}
+      - name: Capture build artifacts
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v6
         with:
           name: build-artifacts-${{ matrix.java }}-${{ matrix.distro }}
           path: |
-            build/libs/
-            build/devlibs/
+            target_repo/build/libs/
+            target_repo/build/devlibs/
