@@ -7,16 +7,13 @@ name: build minecraft mod
 on: 
   workflow_dispatch:
     inputs:
-      repo_url:
-        description: "minecraft mod repo URL"
+      repo:
+        description: "minecraft mod repo (owner/repo)"
         required: true
-      repo_branch:
+      repo_ref:
         description: "repo branch (leave empty for default branch)"
         required: false
         default: ""
-      repo_commit:
-        description: "Commit SHA (leave empty for branch HEAD)"
-        required: false
 
 jobs:
   build:
@@ -30,40 +27,18 @@ jobs:
       # 1. We must check out the current repo bare minimum to run local scripts, 
       # OR we can just fetch the target repository directly if that is the goal.
       # Assuming you want to clone the target repository provided in 'repo_url':
-      
-      - name: Clone repository
-        run: |
-          TARGET_URL="${{ inputs.repo_url }}"
-          TARGET_BRANCH="${{ inputs.repo_branch }}"
-          TARGET_COMMIT="${{ inputs.repo_commit }}"
-      
-          if [ -z "$TARGET_BRANCH" ]; then
-            REPO_PATH=$(echo "$TARGET_URL" | sed -E 's|https://github.com/||' | sed 's/\.git$//')
-            TARGET_BRANCH=$(gh repo view "$REPO_PATH" --json defaultBranchRef --jq '.defaultBranchRef.name')
-          fi
-      
-          git clone --depth 1 --branch "$TARGET_BRANCH" "$TARGET_URL" target_repo
-      
-          if [ -n "$TARGET_COMMIT" ]; then
-            cd target_repo
-            git fetch --depth 1 origin "$TARGET_COMMIT"
-            git checkout "$TARGET_COMMIT"
-          fi
-
-      - name: validate gradle wrapper
-        working-directory: target_repo
-        uses: gradle/actions/wrapper-validation@v5
-
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.repo_ref }}
       - name: setup jdk ${{ matrix.java }}
-        working-directory: target_repo
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v5.6.0
         with:
           distribution: ${{ matrix.distro }}
           java-version: ${{ matrix.java }}
 
       - name: setup gradle
         uses: gradle/actions/setup-gradle@v5
-        working-directory: target_repo
         with:
           # Tuned to look at matrix context since this is an external repo workflow
           cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
