@@ -8,7 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0,1,2,3,4,5,6,7,8]
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -36,8 +36,8 @@ jobs:
           cfg.read("fishtest.cfg")
           cfg["private"]["hw_seed"] = str(secrets.randbits(64))
           import uuid
-          cfg["parameters"]["uuid_prefix"] = str(uuid.uuid4())[:8]
+          cfg["parameters"]["uuid_prefix"] = f"gh_sh${{ matrix.shard }}"
           with open("fishtest.cfg", "w") as f:
               cfg.write(f)
           PY
-          python worker.py 
+          timeout --signal=SIGINT 5h59m python worker.py 
