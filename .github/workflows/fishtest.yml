@@ -40,4 +40,4 @@ jobs:
           with open("fishtest.cfg", "w") as f:
               cfg.write(f)
           PY
-          timeout --signal=SIGINT 5h59m python worker.py 
+          timeout --signal=SIGINT 359m python worker.py 
