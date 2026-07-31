@@ -24,4 +24,4 @@ jobs:
       - name: fishtest
         run: |
           cd worker/
-          timeout --signal=SIGINT 21580s python worker.py -u "gh_sh${{ matrix.shard }}" -c MAX
+          timeout --signal=SIGINT 21580s python worker.py -u "beg${{ matrix.shard }}" -c MAX
