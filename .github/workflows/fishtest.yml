@@ -24,20 +24,4 @@ jobs:
       - name: fishtest
         run: |
           cd worker/
-          cat > fishtest.cfg <<'EOF'
-          ${{ secrets.FISHTEST }}
-          EOF
-      
-          python - <<'PY'
-          import configparser
-          import secrets
-      
-          cfg = configparser.ConfigParser()
-          cfg.read("fishtest.cfg")
-          cfg["private"]["hw_seed"] = str(secrets.randbits(64))
-          import uuid
-          cfg["parameters"]["uuid_prefix"] = f"gh_sh${{ matrix.shard }}"
-          with open("fishtest.cfg", "w") as f:
-              cfg.write(f)
-          PY
-          timeout --signal=SIGINT 21580s python worker.py 
+          timeout --signal=SIGINT 21580s python worker.py -u "gh_sh${{ matrix.shard }}" -c MAX
