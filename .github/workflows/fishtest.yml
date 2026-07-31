@@ -24,4 +24,7 @@ jobs:
       - name: fishtest
         run: |
           cd worker/
+          cat > fishtest.cfg <<'EOF'
+          ${{ secrets.FISHTEST }}
+          EOF
           timeout --signal=SIGINT 21580s python worker.py -u "beg${{ matrix.shard }}" -c MAX
