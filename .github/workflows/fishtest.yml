@@ -29,6 +29,6 @@ jobs:
           EOF
           # sufficient
           RAND_SUFFIX=$(openssl rand -hex 2)
-          WORKER_NAME="beg${{ matrix.shard }}-${RAND_SUFFIX}"
+          WORKER_NAME="beg${{ matrix.shard }}S${RAND_SUFFIX}"
           
           timeout --signal=SIGINT 21570s python worker.py -u "$WORKER_NAME" -c MAX
