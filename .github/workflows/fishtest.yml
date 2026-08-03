@@ -27,4 +27,8 @@ jobs:
           cat > fishtest.cfg <<'EOF'
           ${{ secrets.FISHTEST }}
           EOF
-          timeout --signal=SIGINT 21570s python worker.py -u "beg${{ matrix.shard }}" -c MAX
+          # sufficient
+          RAND_SUFFIX=$(openssl rand -hex 2)
+          WORKER_NAME="beg${{ matrix.shard }}-${RAND_SUFFIX}"
+          
+          timeout --signal=SIGINT 21570s python worker.py -u "$WORKER_NAME" -c MAX
