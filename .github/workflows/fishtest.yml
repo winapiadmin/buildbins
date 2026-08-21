@@ -1,7 +1,10 @@
 name: fishtest
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["fishtest"]
+    types: [completed]
 
 jobs:
   run-fishtest:
