@@ -58,3 +58,10 @@ jobs:
           path: |
             build/libs/
             build/devlibs/
+      - name: Capture build artifacts
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: raw-build-artifacts-${{ matrix.java }}-${{ matrix.distro }}
+          path: |
+            build/
