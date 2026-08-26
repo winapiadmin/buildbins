@@ -64,4 +64,4 @@ jobs:
         with:
           name: raw-build-artifacts-${{ matrix.java }}-${{ matrix.distro }}
           path: |
-            build/
+            .
